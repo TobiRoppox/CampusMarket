@@ -11,19 +11,19 @@ const analyticsRouter = AnalyticsRouter();
 analyticsRouter.get(
   "/sales",
   verifyToken,
-  requireRole(["seller", "admin"]),
+  requireRole("seller", "admin"),
   getSalesAnalytics,
 );
 analyticsRouter.get(
   "/products/top",
   verifyToken,
-  requireRole(["seller", "admin"]),
+  requireRole("seller", "admin"),
   getTopProducts,
 );
 analyticsRouter.get(
   "/categories",
   verifyToken,
-  requireRole(["seller", "admin"]),
+  requireRole("seller", "admin"),
   getCategoryBreakdown,
 );
 

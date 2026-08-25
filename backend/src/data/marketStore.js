@@ -119,6 +119,26 @@ const buildSeedState = () => {
     messages: [],
     carts: [],
     behavior: [],
+    events: [
+      {
+        id: randomUUID(),
+        name: "Spring Fair",
+        date: "2026-05-01",
+        location: "CSUCC Grounds",
+        description: "A fun spring event featuring local student stalls.",
+        created_at: now,
+      },
+      {
+        id: randomUUID(),
+        name: "Summer Fest",
+        date: "2026-06-15",
+        location: "CSUCC Covered Court",
+        description: "Enjoy summer vibes with food, music, and merch.",
+        created_at: now,
+      },
+    ],
+    eventStalls: [],
+    applications: [],
   };
 };
 
@@ -129,6 +149,10 @@ const ensureState = () => {
   if (fs.existsSync(dataFile)) {
     try {
       state = JSON.parse(fs.readFileSync(dataFile, "utf8"));
+      // Backfill new collections for stores created before this update
+      if (!state.events) state.events = [];
+      if (!state.eventStalls) state.eventStalls = [];
+      if (!state.applications) state.applications = [];
       return state;
     } catch {
       // ignore and fall back to seed state
@@ -147,7 +171,8 @@ const saveState = () => {
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-const findUserByEmail = (email) => ensureState().users.find((u) => u.email === email);
+const findUserByEmail = (email) =>
+  ensureState().users.find((u) => u.email === email);
 
 const findUserById = (id) => ensureState().users.find((u) => u.id === id);
 
@@ -155,7 +180,8 @@ const findStallById = (id) => ensureState().stalls.find((s) => s.id === id);
 
 const findProductById = (id) => ensureState().products.find((p) => p.id === id);
 
-const getSellerProductCount = (stallId) => ensureState().products.filter((p) => p.stall_id === stallId).length;
+const getSellerProductCount = (stallId) =>
+  ensureState().products.filter((p) => p.stall_id === stallId).length;
 
 export const authStore = {
   async registerUser({ name, email, password, role = "buyer" }) {
@@ -330,7 +356,8 @@ export const stallStore = {
     const current = ensureState();
     const stall = current.stalls.find((entry) => entry.id === stallId);
     if (!stall) throw new Error("Stall not found");
-    if (stall.owner_id !== ownerId) throw Object.assign(new Error("Forbidden"), { status: 403 });
+    if (stall.owner_id !== ownerId)
+      throw Object.assign(new Error("Forbidden"), { status: 403 });
 
     Object.assign(stall, payload);
     saveState();
@@ -350,7 +377,14 @@ export const stallStore = {
 };
 
 export const productStore = {
-  async listProducts({ q = "", category, page = 1, limit = 20, stallId, activeOnly = true } = {}) {
+  async listProducts({
+    q = "",
+    category,
+    page = 1,
+    limit = 20,
+    stallId,
+    activeOnly = true,
+  } = {}) {
     const current = ensureState();
     const filtered = current.products.filter((product) => {
       const matchActive = !activeOnly || product.is_active;
@@ -382,7 +416,10 @@ export const productStore = {
 
     product.view_count = (product.view_count || 0) + 1;
     saveState();
-    return clone({ ...product, stalls: current.stalls.find((stall) => stall.id === product.stall_id) });
+    return clone({
+      ...product,
+      stalls: current.stalls.find((stall) => stall.id === product.stall_id),
+    });
   },
 
   async create(stallId, payload) {
@@ -390,7 +427,9 @@ export const productStore = {
     const stall = current.stalls.find((entry) => entry.id === stallId);
     if (!stall) throw new Error("Stall not found");
 
-    const count = current.products.filter((product) => product.stall_id === stallId).length;
+    const count = current.products.filter(
+      (product) => product.stall_id === stallId,
+    ).length;
     if (stall.tier === "free" && count >= 15) {
       const error = new Error("Free tier listing cap reached");
       error.status = 403;
@@ -424,7 +463,10 @@ export const productStore = {
 
     Object.assign(product, payload);
     saveState();
-    return clone({ ...product, stalls: current.stalls.find((stall) => stall.id === product.stall_id) });
+    return clone({
+      ...product,
+      stalls: current.stalls.find((stall) => stall.id === product.stall_id),
+    });
   },
 
   async remove(productId) {
@@ -439,25 +481,48 @@ export const productStore = {
   async getRecommendations(userId) {
     const current = ensureState();
     const products = current.products.filter((p) => p.is_active).slice(0, 8);
-    return clone(products.map((product) => ({ ...product, stalls: current.stalls.find((stall) => stall.id === product.stall_id) })));
+    return clone(
+      products.map((product) => ({
+        ...product,
+        stalls: current.stalls.find((stall) => stall.id === product.stall_id),
+      })),
+    );
   },
 
   async getSimilar(productId) {
     const current = ensureState();
     const source = current.products.find((entry) => entry.id === productId);
     if (!source) return [];
-    const similar = current.products.filter((product) => product.is_active && product.category === source.category && product.id !== productId).slice(0, 4);
-    return clone(similar.map((product) => ({ ...product, stalls: current.stalls.find((stall) => stall.id === product.stall_id) })));
+    const similar = current.products
+      .filter(
+        (product) =>
+          product.is_active &&
+          product.category === source.category &&
+          product.id !== productId,
+      )
+      .slice(0, 4);
+    return clone(
+      similar.map((product) => ({
+        ...product,
+        stalls: current.stalls.find((stall) => stall.id === product.stall_id),
+      })),
+    );
   },
 };
 
 export const cartStore = {
   async list(userId) {
     const current = ensureState();
-    return clone(current.carts.filter((item) => item.user_id === userId).map((item) => ({
-      ...item,
-      products: current.products.find((product) => product.id === item.product_id),
-    })));
+    return clone(
+      current.carts
+        .filter((item) => item.user_id === userId)
+        .map((item) => ({
+          ...item,
+          products: current.products.find(
+            (product) => product.id === item.product_id,
+          ),
+        })),
+    );
   },
 
   async add(userId, productId, quantity = 1) {
@@ -466,11 +531,18 @@ export const cartStore = {
     if (!product) throw new Error("Product not found");
     if (!product.is_active) throw new Error("Product is unavailable");
 
-    let entry = current.carts.find((item) => item.user_id === userId && item.product_id === productId);
+    let entry = current.carts.find(
+      (item) => item.user_id === userId && item.product_id === productId,
+    );
     if (entry) {
       entry.quantity += Number(quantity);
     } else {
-      entry = { id: randomUUID(), user_id: userId, product_id: productId, quantity: Number(quantity) };
+      entry = {
+        id: randomUUID(),
+        user_id: userId,
+        product_id: productId,
+        quantity: Number(quantity),
+      };
       current.carts.push(entry);
     }
     saveState();
@@ -479,7 +551,9 @@ export const cartStore = {
 
   async update(userId, itemId, quantity) {
     const current = ensureState();
-    const entry = current.carts.find((item) => item.id === itemId && item.user_id === userId);
+    const entry = current.carts.find(
+      (item) => item.id === itemId && item.user_id === userId,
+    );
     if (!entry) throw new Error("Cart item not found");
     entry.quantity = Number(quantity);
     saveState();
@@ -488,7 +562,9 @@ export const cartStore = {
 
   async remove(userId, itemId) {
     const current = ensureState();
-    const index = current.carts.findIndex((item) => item.id === itemId && item.user_id === userId);
+    const index = current.carts.findIndex(
+      (item) => item.id === itemId && item.user_id === userId,
+    );
     if (index < 0) throw new Error("Cart item not found");
     current.carts.splice(index, 1);
     saveState();
@@ -507,7 +583,9 @@ export const orderStore = {
   async create(buyerId, items, deliveryNotes = "") {
     const current = ensureState();
     const productIds = items.map((item) => item.product_id);
-    const selectedProducts = current.products.filter((product) => productIds.includes(product.id));
+    const selectedProducts = current.products.filter((product) =>
+      productIds.includes(product.id),
+    );
     if (selectedProducts.length !== productIds.length) {
       throw new Error("One or more products were not found");
     }
@@ -515,22 +593,38 @@ export const orderStore = {
     const orderItems = [];
     const sellers = new Set();
     for (const item of items) {
-      const product = selectedProducts.find((entry) => entry.id === item.product_id);
+      const product = selectedProducts.find(
+        (entry) => entry.id === item.product_id,
+      );
       if (!product || product.stock < item.quantity) {
-        throw new Error(`Insufficient stock for ${product?.name || item.product_id}`);
+        throw new Error(
+          `Insufficient stock for ${product?.name || item.product_id}`,
+        );
       }
       product.stock -= item.quantity;
-      const stall = current.stalls.find((entry) => entry.id === product.stall_id);
+      const stall = current.stalls.find(
+        (entry) => entry.id === product.stall_id,
+      );
       if (stall) sellers.add(stall.owner_id);
-      orderItems.push({ product_id: product.id, quantity: item.quantity, unit_price: product.price });
+      orderItems.push({
+        product_id: product.id,
+        quantity: item.quantity,
+        unit_price: product.price,
+      });
     }
 
-    const sellerId = sellers.size === 1 ? Array.from(sellers)[0] : current.stalls[0]?.owner_id || buyerId;
+    const sellerId =
+      sellers.size === 1
+        ? Array.from(sellers)[0]
+        : current.stalls[0]?.owner_id || buyerId;
     const order = {
       id: randomUUID(),
       buyer_id: buyerId,
       seller_id: sellerId,
-      total: orderItems.reduce((sum, item) => sum + item.unit_price * item.quantity, 0),
+      total: orderItems.reduce(
+        (sum, item) => sum + item.unit_price * item.quantity,
+        0,
+      ),
       status: "pending",
       delivery_notes: deliveryNotes,
       created_at: new Date().toISOString(),
@@ -544,19 +638,35 @@ export const orderStore = {
 
   async listBuyer(buyerId) {
     const current = ensureState();
-    return clone(current.orders.filter((order) => order.buyer_id === buyerId).sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    return clone(
+      current.orders
+        .filter((order) => order.buyer_id === buyerId)
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    );
   },
 
   async listSeller(sellerId, status) {
     const current = ensureState();
-    return clone(current.orders.filter((order) => order.seller_id === sellerId && (!status || order.status === status)).sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    return clone(
+      current.orders
+        .filter(
+          (order) =>
+            order.seller_id === sellerId &&
+            (!status || order.status === status),
+        )
+        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+    );
   },
 
-  async updateStatus(orderId, status, actorId) {
+  async updateStatus(orderId, status, actorId, actorRole) {
     const current = ensureState();
     const order = current.orders.find((entry) => entry.id === orderId);
     if (!order) throw new Error("Order not found");
-    if (actorId !== order.buyer_id && actorId !== order.seller_id && actorId !== current.users.find((user) => user.role === "admin")?.id) {
+    const isAuthorized =
+      actorId === order.buyer_id ||
+      actorId === order.seller_id ||
+      actorRole === "admin";
+    if (!isAuthorized) {
       const error = new Error("Not authorized");
       error.status = 403;
       throw error;
@@ -570,12 +680,18 @@ export const orderStore = {
 export const messageStore = {
   async listConversations(userId) {
     const current = ensureState();
-    const filtered = current.messages.filter((message) => message.sender_id === userId || message.receiver_id === userId).sort((a, b) => b.sent_at.localeCompare(a.sent_at));
+    const filtered = current.messages
+      .filter(
+        (message) =>
+          message.sender_id === userId || message.receiver_id === userId,
+      )
+      .sort((a, b) => b.sent_at.localeCompare(a.sent_at));
     const partners = [];
     const seen = new Set();
 
     for (const message of filtered) {
-      const partnerId = message.sender_id === userId ? message.receiver_id : message.sender_id;
+      const partnerId =
+        message.sender_id === userId ? message.receiver_id : message.sender_id;
       if (!seen.has(partnerId)) {
         seen.add(partnerId);
         partners.push({
@@ -590,11 +706,15 @@ export const messageStore = {
 
   async listThread(userId, partnerId) {
     const current = ensureState();
-    const thread = current.messages.filter((message) => {
-      const sentByUser = message.sender_id === userId && message.receiver_id === partnerId;
-      const sentByPartner = message.sender_id === partnerId && message.receiver_id === userId;
-      return sentByUser || sentByPartner;
-    }).sort((a, b) => a.sent_at.localeCompare(b.sent_at));
+    const thread = current.messages
+      .filter((message) => {
+        const sentByUser =
+          message.sender_id === userId && message.receiver_id === partnerId;
+        const sentByPartner =
+          message.sender_id === partnerId && message.receiver_id === userId;
+        return sentByUser || sentByPartner;
+      })
+      .sort((a, b) => a.sent_at.localeCompare(b.sent_at));
 
     return clone(thread);
   },
@@ -616,10 +736,104 @@ export const messageStore = {
   },
 };
 
-export const analyticsStore = {
-  async salesSummary(userId) {
+export const eventStore = {
+  async listEvents() {
     const current = ensureState();
-    const orders = current.orders.filter((order) => order.seller_id === userId && order.status !== "cancelled");
+    return clone(
+      current.events.slice().sort((a, b) => a.date.localeCompare(b.date)),
+    );
+  },
+
+  async getById(eventId) {
+    const current = ensureState();
+    const event = current.events.find((entry) => entry.id === eventId);
+    if (!event) {
+      const error = new Error("Event not found");
+      error.status = 404;
+      throw error;
+    }
+    return clone(event);
+  },
+
+  async listStallsForEvent(eventId) {
+    const current = ensureState();
+    const event = current.events.find((entry) => entry.id === eventId);
+    if (!event) {
+      const error = new Error("Event not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const stalls = current.eventStalls
+      .filter((entry) => entry.event_id === eventId)
+      .map((entry) => {
+        const seller = entry.seller_id
+          ? current.stalls.find((s) => s.owner_id === entry.seller_id)
+          : null;
+        return {
+          ...entry,
+          sellerName: seller
+            ? current.users.find((u) => u.id === seller.owner_id)?.name || ""
+            : "",
+          productsAvailable: seller
+            ? current.products
+                .filter((p) => p.stall_id === seller.id)
+                .map((p) => p.name)
+            : [],
+        };
+      });
+
+    return clone(stalls);
+  },
+
+  async submitApplication(sellerId, payload) {
+    const current = ensureState();
+    const event = current.events.find((entry) => entry.id === payload.eventId);
+    if (!event) {
+      const error = new Error("Event not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const application = {
+      id: randomUUID(),
+      seller_id: sellerId,
+      event_id: payload.eventId,
+      stall_name: payload.stallName,
+      business_name: payload.businessName,
+      product_category: payload.productCategory,
+      product_list: payload.productList,
+      preferred_stall_size: payload.preferredStallSize,
+      duration: payload.duration,
+      contact_info: payload.contactInfo,
+      status: "pending",
+      created_at: new Date().toISOString(),
+    };
+
+    current.applications.push(application);
+    saveState();
+    return clone(application);
+  },
+
+  async listApplications({ eventId, status } = {}) {
+    const current = ensureState();
+    const items = current.applications.filter((entry) => {
+      const matchEvent = !eventId || entry.event_id === eventId;
+      const matchStatus = !status || entry.status === status;
+      return matchEvent && matchStatus;
+    });
+    return clone(items);
+  },
+};
+
+export const analyticsStore = {
+  async salesSummary(userId, role) {
+    const current = ensureState();
+    const orders = current.orders.filter((order) => {
+      const scoped = role === "admin" ? true : order.seller_id === userId;
+      return scoped && order.status !== "cancelled";
+    });
+
     const timeline = {};
     for (const order of orders) {
       const date = order.created_at.slice(0, 10);
@@ -628,38 +842,91 @@ export const analyticsStore = {
       timeline[date].orders += 1;
     }
 
-    const totalRevenue = orders.reduce((sum, order) => sum + Number(order.total), 0);
+    const totalRevenue = orders.reduce(
+      (sum, order) => sum + Number(order.total),
+      0,
+    );
     const totalOrders = orders.length;
     return {
-      timeline: Object.values(timeline).sort((a, b) => a.date.localeCompare(b.date)),
+      timeline: Object.values(timeline).sort((a, b) =>
+        a.date.localeCompare(b.date),
+      ),
       total_revenue: Number(totalRevenue.toFixed(2)),
       total_orders: totalOrders,
-      avg_order_value: totalOrders ? Number((totalRevenue / totalOrders).toFixed(2)) : 0,
+      avg_order_value: totalOrders
+        ? Number((totalRevenue / totalOrders).toFixed(2))
+        : 0,
     };
   },
 
-  async topProducts(userId) {
+  async topProducts(userId, role) {
     const current = ensureState();
+    const scopedOrders = current.orders.filter((entry) =>
+      role === "admin" ? true : entry.seller_id === userId,
+    );
+
     const map = {};
-    for (const order of current.orders.filter((entry) => entry.seller_id === userId)) {
+    for (const order of scopedOrders) {
       for (const item of order.items || []) {
-        const product = current.products.find((entry) => entry.id === item.product_id);
+        const product = current.products.find(
+          (entry) => entry.id === item.product_id,
+        );
         if (!map[item.product_id]) {
-          map[item.product_id] = { product_id: item.product_id, product, total_sold: 0, revenue: 0 };
+          map[item.product_id] = {
+            product_id: item.product_id,
+            product,
+            total_sold: 0,
+            revenue: 0,
+          };
         }
         map[item.product_id].total_sold += item.quantity;
         map[item.product_id].revenue += item.quantity * Number(item.unit_price);
       }
     }
 
-    return Object.values(map).sort((a, b) => b.total_sold - a.total_sold).slice(0, 6).map((entry) => ({ ...entry, revenue: Number(entry.revenue.toFixed(2)) }));
+    return Object.values(map)
+      .sort((a, b) => b.total_sold - a.total_sold)
+      .slice(0, 6)
+      .map((entry) => ({
+        ...entry,
+        revenue: Number(entry.revenue.toFixed(2)),
+      }));
+  },
+
+  async categoryBreakdown(userId, role) {
+    const current = ensureState();
+    const scopedOrders = current.orders.filter((entry) =>
+      role === "admin" ? true : entry.seller_id === userId,
+    );
+
+    const map = {};
+    for (const order of scopedOrders) {
+      for (const item of order.items || []) {
+        const product = current.products.find(
+          (entry) => entry.id === item.product_id,
+        );
+        const category = product?.category || "other";
+        if (!map[category]) map[category] = { category, revenue: 0 };
+        map[category].revenue += item.quantity * Number(item.unit_price);
+      }
+    }
+
+    return Object.values(map)
+      .map((entry) => ({ ...entry, revenue: Number(entry.revenue.toFixed(2)) }))
+      .sort((a, b) => b.revenue - a.revenue);
   },
 };
 
 export const behaviorStore = {
   async log(userId, productId, action) {
     const current = ensureState();
-    current.behavior.push({ id: randomUUID(), user_id: userId, product_id: productId, action, created_at: new Date().toISOString() });
+    current.behavior.push({
+      id: randomUUID(),
+      user_id: userId,
+      product_id: productId,
+      action,
+      created_at: new Date().toISOString(),
+    });
     saveState();
     return true;
   },
@@ -669,9 +936,14 @@ export const adminStore = {
   async getStats() {
     const current = ensureState();
     const total_users = current.users.length;
-    const active_stalls = current.stalls.filter((stall) => stall.status === "approved").length;
+    const active_stalls = current.stalls.filter(
+      (stall) => stall.status === "approved",
+    ).length;
     const total_orders = current.orders.length;
-    const total_revenue = current.orders.reduce((sum, order) => sum + Number(order.total), 0);
+    const total_revenue = current.orders.reduce(
+      (sum, order) => sum + Number(order.total),
+      0,
+    );
     return {
       total_users,
       active_stalls,
@@ -689,10 +961,21 @@ export const adminStore = {
 
 export const getFeaturedStalls = () => {
   const current = ensureState();
-  return clone(current.stalls.filter((stall) => stall.is_active && stall.status === "approved"));
+  return clone(
+    current.stalls.filter(
+      (stall) => stall.is_active && stall.status === "approved",
+    ),
+  );
 };
 
 export const getPublicProductFeed = () => {
   const current = ensureState();
-  return clone(current.products.filter((product) => product.is_active).map((product) => ({ ...product, stalls: current.stalls.find((stall) => stall.id === product.stall_id) })));
+  return clone(
+    current.products
+      .filter((product) => product.is_active)
+      .map((product) => ({
+        ...product,
+        stalls: current.stalls.find((stall) => stall.id === product.stall_id),
+      })),
+  );
 };

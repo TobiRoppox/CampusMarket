@@ -1,36 +1,27 @@
-const express = require('express');
-const router = express.Router();
+import { Router as EventRouter } from "express";
+import {
+  getEvents,
+  getEventStalls,
+  submitSellerApplication,
+  getSellerApplications,
+} from "../controllers/event.controller.js";
+import { verifyToken, requireRole } from "../middleware/auth.js";
 
-// Mock database
-const events = [
-  { id: 1, name: 'Spring Fair', date: '2026-05-01', location: 'Central Park', description: 'A fun spring event.' },
-  { id: 2, name: 'Summer Fest', date: '2026-06-15', location: 'Beachside', description: 'Enjoy summer vibes.' },
-];
+const eventRouter = EventRouter();
 
-const stalls = [
-  { id: 'A1', eventId: 1, size: 10, status: 'Available', sellerName: '', productsAvailable: [] },
-  { id: 'A2', eventId: 1, size: 20, status: 'Occupied', sellerName: 'John Doe', productsAvailable: ['Candies', 'Toys'] },
-];
+eventRouter.get("/events", getEvents);
+eventRouter.get("/events/:eventId/stalls", getEventStalls);
+eventRouter.post(
+  "/seller-applications",
+  verifyToken,
+  requireRole("seller"),
+  submitSellerApplication,
+);
+eventRouter.get(
+  "/seller-applications",
+  verifyToken,
+  requireRole("admin"),
+  getSellerApplications,
+);
 
-const sellerApplications = [];
-
-// Get all events
-router.get('/events', (req, res) => {
-  res.json(events);
-});
-
-// Get stalls for an event
-router.get('/events/:eventId/stalls', (req, res) => {
-  const { eventId } = req.params;
-  const eventStalls = stalls.filter(stall => stall.eventId === parseInt(eventId));
-  res.json(eventStalls);
-});
-
-// Submit seller application
-router.post('/seller-applications', (req, res) => {
-  const application = req.body;
-  sellerApplications.push({ id: sellerApplications.length + 1, ...application, status: 'Pending' });
-  res.status(201).json({ message: 'Application submitted successfully!' });
-});
-
-module.exports = router;
+export { eventRouter as default };

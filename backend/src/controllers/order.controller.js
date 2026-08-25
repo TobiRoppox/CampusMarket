@@ -36,12 +36,23 @@ export const getSellerOrders = async (req, res, next) => {
 export const updateOrderStatus = async (req, res, next) => {
   try {
     const { status } = req.body;
-    const validStatuses = ["pending", "confirmed", "ready", "delivered", "cancelled"];
+    const validStatuses = [
+      "pending",
+      "confirmed",
+      "ready",
+      "delivered",
+      "cancelled",
+    ];
     if (!validStatuses.includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
 
-    const order = await orderStore.updateStatus(req.params.id, status, req.user.id);
+    const order = await orderStore.updateStatus(
+      req.params.id,
+      status,
+      req.user.id,
+      req.user.role,
+    );
     res.json(order);
   } catch (err) {
     next(err);
