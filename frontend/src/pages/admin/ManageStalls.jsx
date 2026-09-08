@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import Sidebar from "../../components/common/Sidebar.jsx";
-import { EmptyState } from "../../components/common/UI.jsx";
+import { EmptyState } from "../../components/common/Ui.jsx";
 import { adminService, stallService } from "../../services/api.js";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
@@ -18,12 +18,7 @@ export default function ManageStalls() {
   const fetchStalls = async () => {
     setLoading(true);
     try {
-      const { data: pending } = await adminService.getPendingStalls();
-      const { data: approved } = await stallService.getAll();
-      const allStalls = [
-        ...pending,
-        ...(approved || []).filter((s) => !pending.find((p) => p.id === s.id)),
-      ];
+      const { data: allStalls } = await adminService.getStalls();
       setStalls(allStalls);
     } catch {
       toast.error("Failed to load stalls");
@@ -53,8 +48,8 @@ export default function ManageStalls() {
         prev.map((s) => (s.id === stallId ? { ...s, status } : s)),
       );
       toast.success(`Stall ${status} successfully`);
-    } catch {
-      toast.error("Action failed");
+    } catch (error) {
+      toast.error(error.response?.data?.error || "Action failed");
     } finally {
       setActingId(null);
     }
@@ -181,7 +176,7 @@ export default function ManageStalls() {
                   <div className="stall-card-body">
                     <p className="stall-card-name">{stall.name}</p>
                     <p className="stall-card-owner text-sm text-muted">
-                      by {stall.users?.name || "Unknown"} · {stall.users?.email}
+                      by {stall.seller_name || stall.users?.name || "Campus seller"} · {stall.users?.email}
                     </p>
                     {stall.description && (
                       <p className="stall-card-desc text-sm text-muted">
@@ -193,6 +188,18 @@ export default function ManageStalls() {
                       {format(new Date(stall.created_at), "MMM d, yyyy")}
                     </p>
 
+                    <label className="form-label" style={{ marginTop: "1rem" }}>Account plan
+                      <select className="form-input" value={stall.tier || "free"} disabled={actingId === stall.id} onChange={async (e) => {
+                        setActingId(stall.id);
+                        try {
+                          const { data } = await adminService.setPlan(stall.id, e.target.value);
+                          setStalls((current) => current.map((item) => item.id === stall.id ? data : item));
+                          toast.success("Plan updated");
+                        } catch (error) { toast.error(error.response?.data?.error || "Plan update failed"); }
+                        finally { setActingId(null); }
+                      }}><option value="free">Free · 15 listings · POS</option><option value="premium">Premium · 50 listings · POS, advertising & analytics</option></select>
+                    </label>
+                    <p className="text-sm text-muted">{stall.product_count || 0} listings · {stall.location}</p>
                     <div className="stall-card-actions">
                       {stall.status === "pending" && (
                         <>

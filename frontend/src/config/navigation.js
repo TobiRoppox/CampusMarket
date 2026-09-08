@@ -41,6 +41,7 @@ export const SELLER_NAV = [
   { to: "/seller", label: "Dashboard", icon: LayoutDashboard },
   { to: "/seller/stall", label: "My Stall", icon: Store },
   { to: "/seller/products", label: "Products", icon: Package },
+  { to: "/seller/pos", label: "Point of Sale", icon: ShoppingCart },
   { to: "/seller/orders", label: "Orders", icon: ClipboardList },
   { to: "/seller/reservations", label: "Events & Reservations", icon: CalendarDays },
   { to: "/seller/analytics", label: "Analytics", icon: BarChart3 },
@@ -51,17 +52,8 @@ export const SELLER_NAV = [
 
 export const ADMIN_NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/admin/users", label: "Users", icon: Users },
-  { to: "/admin/sellers", label: "Sellers", icon: UserCheck },
-  { to: "/admin/products", label: "Products", icon: Package },
-  { to: "/admin/categories", label: "Categories", icon: Tags },
-  { to: "/admin/events", label: "Events", icon: Calendar },
-  { to: "/admin/stall-map", label: "Stall Map", icon: Map },
-  { to: "/admin/reservations", label: "Reservations", icon: CalendarDays },
-  { to: "/admin/reports", label: "Reports", icon: FileText },
-  { to: "/admin/analytics", label: "Analytics", icon: TrendingUp },
-  { to: "/admin/complaints", label: "Complaints", icon: AlertTriangle },
-  { to: "/admin/settings", label: "Settings", icon: Settings },
+  { to: "/admin/users", label: "Registration & Users", icon: Users },
+  { to: "/admin/stalls", label: "Stores & Plans", icon: Store },
 ];
 
 export const BUYER_TOP_LINKS = [

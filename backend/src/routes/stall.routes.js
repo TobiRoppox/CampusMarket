@@ -12,7 +12,7 @@ stallRouter.get("/", getStalls);
 stallRouter.get("/my", verifyToken, requireRole("seller"), getMyStall);
 stallRouter.get("/:id", getStall);
 stallRouter.post("/", verifyToken, requireRole("seller"), validate(stallSchema), createStall);
-stallRouter.put("/:id", verifyToken, requireRole("seller", "admin"), updateStall);
+stallRouter.put("/:id", verifyToken, requireRole("seller"), validate(stallSchema.partial()), updateStall);
 stallRouter.put("/:id/status", verifyToken, requireRole("admin"), updateStallStatus);
  
 export { stallRouter as default };

@@ -1,218 +1,325 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  Package,
-  MessageSquare,
-  Tag,
+  Bell,
   CalendarDays,
   CheckCheck,
+  ChevronRight,
+  Inbox,
+  MessageSquare,
+  Package,
+  Tag,
+  XCircle,
 } from "lucide-react";
 import Navbar from "../../components/common/Navbar.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
+import notificationService from "../../services/notificationService.js";
+import toast from "react-hot-toast";
 
 const TYPE_META = {
-  order: { icon: Package, color: "#1f9d4d" },
-  message: { icon: MessageSquare, color: "#2563eb" },
-  promo: { icon: Tag, color: "#d97706" },
-  event: { icon: CalendarDays, color: "#7c3aed" },
+  order: { icon: Package, label: "Orders" },
+  message: { icon: MessageSquare, label: "Messages" },
+  promo: { icon: Tag, label: "Promotions" },
+  event: { icon: CalendarDays, label: "Events" },
 };
 
-// TODO: replace with notificationService.getAll(user.id) once that endpoint exists
-const MOCK_NOTIFICATIONS = [
-  {
-    id: 1,
-    type: "order",
-    title: "Order #ORD-004 is now Processing",
-    body: "Sofia Gomez's order is being prepared.",
-    time: "10 minutes ago",
-    read: false,
-    link: "/orders",
-  },
-  {
-    id: 2,
-    type: "message",
-    title: "New message from Sweet Finds PH",
-    body: '"Yes, we still have that flavor available!"',
-    time: "1 hour ago",
-    read: false,
-    link: "/messages",
-  },
-  {
-    id: 3,
-    type: "event",
-    title: "CSU Food Fest 2024 starts tomorrow",
-    body: "Don't forget to check out the stalls at CSUCC Grounds.",
-    time: "3 hours ago",
-    read: true,
-    link: "/events/1",
-  },
-  {
-    id: 4,
-    type: "promo",
-    title: "10% off at Crafty Hands",
-    body: "Limited-time discount on all keychains this week.",
-    time: "Yesterday",
-    read: true,
-    link: "/stalls/2",
-  },
-  {
-    id: 5,
-    type: "order",
-    title: "Order #ORD-002 was completed",
-    body: "Thanks for your purchase from Sweet Finds PH!",
-    time: "2 days ago",
-    read: true,
-    link: "/orders",
-  },
+const FILTERS = [
+  { value: "all", label: "All" },
+  { value: "unread", label: "Unread" },
+  { value: "order", label: "Orders" },
+  { value: "message", label: "Messages" },
+  { value: "event", label: "Events" },
 ];
 
+const relativeTime = (value, fallback) => {
+  if (!value) return fallback || "Recently";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback || "Recently";
+
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return "Just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60)
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} ${days === 1 ? "day" : "days"} ago`;
+
+  return date.toLocaleDateString("en-PH", {
+    month: "short",
+    day: "numeric",
+    year:
+      date.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+  });
+};
+
 export default function Notifications() {
+  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
+  const [markingAll, setMarkingAll] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    // TODO: swap for notificationService.getAll(user.id)
-    const timer = setTimeout(() => {
-      setNotifications(MOCK_NOTIFICATIONS);
+    if (!user?.id) {
+      setNotifications([]);
       setLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, []);
+      return undefined;
+    }
 
-  const markAllRead = () => {
-    // TODO: notificationService.markAllRead(user.id)
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    let active = true;
+    setLoading(true);
+    setError("");
+
+    notificationService
+      .getAll(user.id)
+      .then((items) => {
+        if (active) setNotifications(items);
+      })
+      .catch(() => {
+        if (active) setError("We could not load your notifications.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    const unsubscribe = notificationService.subscribe(user.id, (items) => {
+      if (active) setNotifications(items);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [user?.id]);
+
+  const unreadCount = notifications.filter(
+    (notification) => !notification.read,
+  ).length;
+
+  const typeCounts = useMemo(
+    () =>
+      notifications.reduce((counts, notification) => {
+        counts[notification.type] = (counts[notification.type] || 0) + 1;
+        return counts;
+      }, {}),
+    [notifications],
+  );
+
+  const visibleNotifications = useMemo(() => {
+    if (filter === "all") return notifications;
+    if (filter === "unread") {
+      return notifications.filter((notification) => !notification.read);
+    }
+    return notifications.filter((notification) => notification.type === filter);
+  }, [filter, notifications]);
+
+  const markAllRead = async () => {
+    if (!user?.id || !unreadCount || markingAll) return;
+    try {
+      setMarkingAll(true);
+      await notificationService.markAllRead(user.id);
+      toast.success("All notifications marked as read");
+    } catch {
+      toast.error("Could not update notifications");
+    } finally {
+      setMarkingAll(false);
+    }
   };
 
-  const markOneRead = (id) => {
-    // TODO: notificationService.markRead(id)
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
-    );
+  const markOneRead = (notification) => {
+    if (!user?.id || notification.read) return;
+    notificationService.markRead(user.id, notification.id).catch(() => {});
   };
-
-  const visible =
-    filter === "unread" ? notifications.filter((n) => !n.read) : notifications;
-  const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
-    <div>
+    <div className="notifications-shell">
       <Navbar />
-      <div className="notif-page">
-        <div className="notif-header">
-          <div>
-            <h1>Notifications</h1>
-            <p>
-              {unreadCount > 0
-                ? `${unreadCount} unread`
-                : "You're all caught up"}
-            </p>
+
+      <main className="notifications-page">
+        <header className="notifications-header">
+          <div className="notifications-title-wrap">
+            <span className="notifications-title-icon" aria-hidden="true">
+              <Bell />
+              {unreadCount > 0 && <i />}
+            </span>
+            <div>
+              <span className="notifications-eyebrow">Your activity</span>
+              <h1>Notifications</h1>
+              <p>
+                {loading
+                  ? "Checking for updates…"
+                  : unreadCount > 0
+                    ? `${unreadCount} unread ${unreadCount === 1 ? "update" : "updates"}`
+                    : "You’re all caught up"}
+              </p>
+            </div>
           </div>
+
           {unreadCount > 0 && (
-            <button className="btn btn-outline btn-sm" onClick={markAllRead}>
-              <CheckCheck size={16} /> Mark all as read
+            <button
+              type="button"
+              className="notifications-read-all"
+              onClick={markAllRead}
+              disabled={markingAll}
+            >
+              {markingAll ? (
+                <span className="spinner notifications-action-spinner" />
+              ) : (
+                <CheckCheck />
+              )}
+              {markingAll ? "Updating…" : "Mark all as read"}
             </button>
           )}
-        </div>
+        </header>
 
-        <div className="notif-filter-bar">
-          <button
-            className={`notif-chip ${filter === "all" ? "active" : ""}`}
-            onClick={() => setFilter("all")}
+        {!loading && !error && notifications.length > 0 && (
+          <nav
+            className="notifications-filters"
+            aria-label="Notification filters"
           >
-            All
-          </button>
-          <button
-            className={`notif-chip ${filter === "unread" ? "active" : ""}`}
-            onClick={() => setFilter("unread")}
-          >
-            Unread
-          </button>
-        </div>
+            {FILTERS.map((option) => {
+              const count =
+                option.value === "all"
+                  ? notifications.length
+                  : option.value === "unread"
+                    ? unreadCount
+                    : typeCounts[option.value] || 0;
+
+              return (
+                <button
+                  type="button"
+                  key={option.value}
+                  className={filter === option.value ? "active" : ""}
+                  onClick={() => setFilter(option.value)}
+                >
+                  {option.label}
+                  <span>{count}</span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
 
         {loading ? (
-          <div className="notif-list">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="notif-skeleton" />
-            ))}
-          </div>
-        ) : visible.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">🔔</div>
-            <h3>No notifications</h3>
+          <NotificationSkeleton />
+        ) : error ? (
+          <section className="notification-state is-error" role="alert">
+            <span>
+              <XCircle />
+            </span>
+            <h2>Notifications unavailable</h2>
+            <p>{error}</p>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => window.location.reload()}
+            >
+              Try again
+            </button>
+          </section>
+        ) : notifications.length === 0 ? (
+          <section className="notification-state">
+            <div className="notification-empty-art" aria-hidden="true">
+              <span>
+                <Bell />
+              </span>
+              <i>
+                <CheckCheck />
+              </i>
+            </div>
+            <span className="notifications-eyebrow">Nothing new</span>
+            <h2>You’re all caught up</h2>
             <p>
-              {filter === "unread"
-                ? "You've read everything!"
-                : "Nothing here yet"}
+              Order updates, seller messages, promotions, and campus events will
+              appear here.
             </p>
-          </div>
+            <Link to="/browse" className="btn btn-primary btn-lg">
+              Explore the market <ChevronRight size={17} />
+            </Link>
+          </section>
+        ) : visibleNotifications.length === 0 ? (
+          <section className="notification-state compact">
+            <span>
+              <Inbox />
+            </span>
+            <h2>No notifications in this view</h2>
+            <p>Choose another filter to see your other updates.</p>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setFilter("all")}
+            >
+              View all notifications
+            </button>
+          </section>
         ) : (
-          <div className="notif-list">
-            {visible.map((n) => {
-              const meta = TYPE_META[n.type] || TYPE_META.order;
+          <section className="notification-list" aria-live="polite">
+            {visibleNotifications.map((notification) => {
+              const meta = TYPE_META[notification.type] || TYPE_META.order;
               const Icon = meta.icon;
+
               return (
                 <Link
-                  to={n.link}
-                  key={n.id}
-                  className={`notif-item ${n.read ? "" : "unread"}`}
-                  onClick={() => markOneRead(n.id)}
+                  to={notification.link || "/notifications"}
+                  key={notification.id}
+                  className={`notification-item type-${notification.type} ${notification.read ? "is-read" : "is-unread"}`}
+                  onClick={() => markOneRead(notification)}
                 >
-                  <div
-                    className="notif-icon"
-                    style={{ background: `${meta.color}1a`, color: meta.color }}
-                  >
-                    <Icon size={18} />
-                  </div>
-                  <div className="notif-body">
-                    <p className="notif-title">{n.title}</p>
-                    <p className="notif-desc">{n.body}</p>
-                    <span className="notif-time">{n.time}</span>
-                  </div>
-                  {!n.read && <span className="notif-dot" />}
+                  <span className="notification-type-icon">
+                    <Icon />
+                  </span>
+                  <span className="notification-content">
+                    <span className="notification-meta-row">
+                      <em>{meta.label}</em>
+                      <time dateTime={notification.created_at}>
+                        {relativeTime(
+                          notification.created_at,
+                          notification.time,
+                        )}
+                      </time>
+                    </span>
+                    <strong>{notification.title}</strong>
+                    {notification.body && <p>{notification.body}</p>}
+                  </span>
+                  {!notification.read && (
+                    <span
+                      className="notification-unread-dot"
+                      aria-label="Unread"
+                    />
+                  )}
+                  <ChevronRight
+                    className="notification-chevron"
+                    aria-hidden="true"
+                  />
                 </Link>
               );
             })}
-          </div>
+          </section>
         )}
-      </div>
+      </main>
+    </div>
+  );
+}
 
-      <style>{`
-        .notif-page { max-width: 720px; margin: 0 auto; padding: 1.75rem 1.5rem 4rem; }
-        .notif-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
-        .notif-header h1 { font-size: 1.5rem; font-weight: 800; color: var(--gray-900, #111827); }
-        .notif-header p { color: var(--gray-500, #6b7280); font-size: 0.9rem; margin-top: 0.15rem; }
-
-        .notif-filter-bar { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; }
-        .notif-chip {
-          padding: 0.4rem 0.9rem; border-radius: 999px;
-          border: 1.5px solid var(--gray-200, #e5e7eb); background: #fff;
-          font-size: 0.85rem; font-weight: 500; color: var(--gray-600, #4b5563); cursor: pointer;
-        }
-        .notif-chip.active { background: var(--green-600, #1f9d4d); border-color: var(--green-600, #1f9d4d); color: #fff; }
-
-        .notif-list { display: flex; flex-direction: column; gap: 0.5rem; }
-        .notif-item {
-          display: flex; align-items: flex-start; gap: 0.85rem; padding: 1rem;
-          border: 1px solid var(--gray-200, #e5e7eb); border-radius: 14px;
-          text-decoration: none; color: inherit; background: #fff; position: relative;
-          transition: background 0.15s;
-        }
-        .notif-item.unread { background: var(--green-50, #f3faf3); border-color: var(--green-100, #dcf0e0); }
-        .notif-item:hover { background: var(--gray-50, #f9fafb); }
-        .notif-icon {
-          width: 38px; height: 38px; border-radius: 999px; flex-shrink: 0;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .notif-title { font-size: 0.9rem; font-weight: 700; color: var(--gray-900, #111827); margin-bottom: 0.15rem; }
-        .notif-desc { font-size: 0.83rem; color: var(--gray-500, #6b7280); margin-bottom: 0.3rem; }
-        .notif-time { font-size: 0.75rem; color: var(--gray-400, #9ca3af); }
-        .notif-dot { position: absolute; top: 1rem; right: 1rem; width: 8px; height: 8px; border-radius: 50%; background: var(--green-600, #1f9d4d); }
-
-        .notif-skeleton { height: 80px; border-radius: 14px; background: var(--gray-100, #f0f1f0); animation: pulse 1.4s ease-in-out infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-      `}</style>
+function NotificationSkeleton() {
+  return (
+    <div
+      className="notification-skeleton-list"
+      aria-label="Loading notifications"
+    >
+      {[0, 1, 2, 3].map((item) => (
+        <div key={item}>
+          <span className="skeleton" />
+          <div>
+            <i className="skeleton" />
+            <i className="skeleton" />
+            <i className="skeleton" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

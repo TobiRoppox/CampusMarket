@@ -1,4 +1,7 @@
-import { Routes, Route, Navigate } from "react-router-dom";
+import AccountStatus from "./pages/auth/AccountStatus.jsx";
+import PointOfSale from "./pages/seller/PointOfSale.jsx";
+import OpenStore from "./pages/seller/OpenStore.jsx";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./context/AuthContext.jsx";
 
 // Auth pages
@@ -18,58 +21,80 @@ import BuyerEvents from "./pages/buyer/BuyerEvents.jsx";
 import EventStalls from "./pages/buyer/EventStalls.jsx";
 import Checkout from "./pages/buyer/Checkout.jsx";
 import Favorites from "./pages/buyer/Favorites.jsx";
+import StallDetails from "./pages/buyer/StallDetails.jsx";
 
 // Seller pages
 import SellerDashboard from "./pages/seller/Dashboard.jsx";
-import MyStall from "./pages/seller/MyStall.jsx";
+import MyStall from "./pages/seller/Mystall.jsx";
 import ManageProducts from "./pages/seller/ManageProducts.jsx";
 import SellerOrders from "./pages/seller/SellerOrders.jsx";
 import Analytics from "./pages/seller/Analytics.jsx";
+import SellerMessages from "./pages/seller/SellerMessages.jsx";
+import SellerApplicationForm from "./pages/seller/SellerApplicationForm.jsx";
+import SellerReservations from "./pages/seller/SellerReservations.jsx";
+import Reviews from "./pages/seller/Reviews.jsx";
+import Settings from "./pages/seller/Settings.jsx";
 
 // Admin pages
 import AdminDashboard from "./pages/admin/AdminDashboard.jsx";
 import ManageUsers from "./pages/admin/ManageUsers.jsx";
 import ManageStalls from "./pages/admin/ManageStalls.jsx";
 
-// ── Route guards ──────────────────────────────────────────────────────────────
+function LoadingScreen() {
+  return (
+    <div className="full-center" role="status" aria-label="Loading application">
+      <div className="spinner spinner-dark" />
+    </div>
+  );
+}
+
+function getDashboardPath(role) {
+  if (role === "admin") return "/admin";
+  if (role === "seller") return "/seller";
+  return "/";
+}
+
 function ProtectedRoute({ children, role }) {
   const { user, loading } = useAuth();
-  if (loading)
-    return (
-      <div className="full-center">
-        <div className="spinner spinner-dark" />
-      </div>
-    );
-  if (!user) return <Navigate to="/login" replace />;
-  if (role && user.role !== role) {
-    // Redirect to the correct dashboard
-    if (user.role === "admin") return <Navigate to="/admin" replace />;
-    if (user.role === "seller") return <Navigate to="/seller" replace />;
-    return <Navigate to="/" replace />;
+
+  if (loading) {
+    return <LoadingScreen />;
   }
+
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (user.status !== "approved") return <Navigate to="/account-status" replace />;
+
+  if (role && user.role !== role) {
+    return <Navigate to={getDashboardPath(user.role)} replace />;
+  }
+
   return children;
 }
 
 function GuestRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading)
-    return (
-      <div className="full-center">
-        <div className="spinner spinner-dark" />
-      </div>
-    );
-  if (user) {
-    if (user.role === "admin") return <Navigate to="/admin" replace />;
-    if (user.role === "seller") return <Navigate to="/seller" replace />;
-    return <Navigate to="/" replace />;
+
+  if (loading) {
+    return <LoadingScreen />;
   }
+
+  if (user) {
+    return <Navigate to={user.status === "approved" ? getDashboardPath(user.role) : "/account-status"} replace />;
+  }
+
   return children;
 }
 
 export default function App() {
   return (
     <Routes>
-      {/* ── Auth ── */}
+      <Route path="/account-status" element={<AccountStatus />} />
+      <Route path="/open-store" element={<ProtectedRoute><OpenStore /></ProtectedRoute>} />
+      <Route path="/seller/pos" element={<ProtectedRoute role="seller"><PointOfSale /></ProtectedRoute>} />
+      {/* Authentication */}
       <Route
         path="/login"
         element={
@@ -78,6 +103,7 @@ export default function App() {
           </GuestRoute>
         }
       />
+
       <Route
         path="/register"
         element={
@@ -86,13 +112,16 @@ export default function App() {
           </GuestRoute>
         }
       />
-      {/* ── Buyer ── */}
+
+      {/* Buyer pages */}
       <Route path="/" element={<BuyerHome />} />
       <Route path="/browse" element={<Browse />} />
       <Route path="/products/:id" element={<ProductDetail />} />
       <Route path="/stalls" element={<Stalls />} />
+      <Route path="/stalls/:stallId" element={<StallDetails />} />
       <Route path="/events" element={<BuyerEvents />} />
       <Route path="/events/:eventId/stalls" element={<EventStalls />} />
+
       <Route
         path="/favorites"
         element={
@@ -101,7 +130,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      Two things to flag:
+
       <Route
         path="/checkout"
         element={
@@ -110,6 +139,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/notifications"
         element={
@@ -118,6 +148,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/cart"
         element={
@@ -126,6 +157,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/orders"
         element={
@@ -134,6 +166,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/messages"
         element={
@@ -142,6 +175,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/messages/:partnerId"
         element={
@@ -150,7 +184,8 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      {/* ── Seller ── */}
+
+      {/* Seller pages */}
       <Route
         path="/seller"
         element={
@@ -159,6 +194,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/seller/stall"
         element={
@@ -167,6 +203,16 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
+      <Route
+        path="/seller/apply"
+        element={
+          <ProtectedRoute role="seller">
+            <SellerApplicationForm />
+          </ProtectedRoute>
+        }
+      />
+
       <Route
         path="/seller/products"
         element={
@@ -175,6 +221,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/seller/orders"
         element={
@@ -183,6 +230,16 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
+      <Route
+        path="/seller/reservations"
+        element={
+          <ProtectedRoute role="seller">
+            <SellerReservations />
+          </ProtectedRoute>
+        }
+      />
+
       <Route
         path="/seller/analytics"
         element={
@@ -191,15 +248,35 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/seller/messages"
         element={
           <ProtectedRoute role="seller">
-            <Messages />
+            <Messages sellerMode />
           </ProtectedRoute>
         }
       />
-      {/* ── Admin ── */}
+
+      <Route
+        path="/seller/reviews"
+        element={
+          <ProtectedRoute role="seller">
+            <Reviews />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/seller/settings"
+        element={
+          <ProtectedRoute role="seller">
+            <Settings />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Admin pages */}
       <Route
         path="/admin"
         element={
@@ -208,6 +285,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/users"
         element={
@@ -216,6 +294,7 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/stalls"
         element={
@@ -224,7 +303,8 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      {/* ── 404 ── */}
+
+      {/* Unknown routes */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

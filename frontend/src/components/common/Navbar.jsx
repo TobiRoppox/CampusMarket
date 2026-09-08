@@ -1,354 +1,436 @@
-import { useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { useCart } from "../../context/CartContext.jsx";
 import {
-  FiShoppingCart,
-  FiLogOut,
-  FiMenu,
-  FiX,
-  FiSearch,
   FiBell,
-  FiHome,
+  FiCalendar,
+  FiChevronDown,
   FiGrid,
+  FiHeart,
+  FiHome,
+  FiLogOut,
+  FiMapPin,
+  FiMenu,
   FiMessageSquare,
   FiPackage,
-  FiHeart,
-  FiChevronDown,
+  FiSearch,
+  FiShoppingBag,
+  FiShoppingCart,
+  FiX,
 } from "react-icons/fi";
+import "./Navbar.css";
+
+const NAV_LINKS = [
+  { to: "/", label: "Home", icon: FiHome },
+  { to: "/stalls", label: "Stalls", icon: FiMapPin },
+  { to: "/browse", label: "Products", icon: FiShoppingBag },
+  { to: "/events", label: "Events", icon: FiCalendar },
+];
+
+const ROLE_LABELS = {
+  buyer: "Buyer",
+  seller: "Seller",
+  admin: "Administrator",
+  super_admin: "Super Administrator",
+};
 
 export default function Navbar() {
   const { user, logout } = useAuth();
   const { count } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+  const userMenuRef = useRef(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
+  const displayName = user?.name?.trim() || "Campus user";
+  const firstName = displayName.split(/\s+/)[0];
+  const userInitial = displayName.charAt(0).toUpperCase();
+  const roleLabel = ROLE_LABELS[user?.role] || "Member";
+  const numericCartCount = Number(count) || 0;
+  const cartCount = numericCartCount > 99 ? "99+" : numericCartCount;
+
+  const isActiveRoute = (path) => {
+    if (path === "/") return location.pathname === "/";
+    return (
+      location.pathname === path || location.pathname.startsWith(`${path}/`)
+    );
+  };
+
+  useEffect(() => {
+    setMobileOpen(false);
+    setDropdownOpen(false);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!dropdownOpen) return undefined;
+
+    const handlePointerDown = (event) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setDropdownOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") setDropdownOpen(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [dropdownOpen]);
+
   const handleLogout = () => {
+    setDropdownOpen(false);
+    setMobileOpen(false);
     logout();
     navigate("/login");
   };
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    if (searchTerm.trim())
-      navigate(`/browse?q=${encodeURIComponent(searchTerm.trim())}`);
+  const handleSearch = (event) => {
+    event.preventDefault();
+    const query = searchTerm.trim();
+    setMobileOpen(false);
+    navigate(query ? `/browse?q=${encodeURIComponent(query)}` : "/browse");
   };
 
-  const navLinks = [
-    { to: "/", label: "Home" },
-    { to: "/stalls", label: "Stalls" },
-    { to: "/browse", label: "Products" },
-    { to: "/events", label: "Events" },
-  ];
-
   return (
-    <nav className="navbar">
-      <div className="navbar-inner container">
-        {/* Logo */}
-        <Link to="/" className="navbar-brand">
-          <span className="brand-icon">🛍️</span>
-          <span className="brand-text">
-            CAMPUS
-            <br />
-            MARKET
-          </span>
-        </Link>
+    <header className="navbar-shell">
+      <nav className="navbar" aria-label="Primary navigation">
+        <div className="navbar-inner container">
+          <Link to="/" className="navbar-brand" aria-label="Campus Market home">
+            <img
+              src="/images/buyer/campusmarket-logo.png"
+              alt="Campus Market"
+              className="navbar-brand-logo"
+            />
+          </Link>
 
-        {/* Desktop links */}
-        <div className="navbar-links">
-          {navLinks.map((l) => (
-            <Link
-              key={l.to}
-              to={l.to}
-              className={`nav-link ${location.pathname === l.to ? "active" : ""}`}
-            >
-              {l.label}
-            </Link>
-          ))}
-        </div>
-
-        {/* Search */}
-        <form className="navbar-search" onSubmit={handleSearch} role="search">
-          <FiSearch size={18} aria-hidden="true" />
-          <input
-            type="search"
-            placeholder="Search for products, stalls, or events..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            aria-label="Search"
-          />
-        </form>
-
-        {/* Right actions */}
-        <div className="navbar-actions">
-          {user?.role === "buyer" && (
-            <>
-              <Link to="/cart" className="icon-btn" aria-label="Cart">
-                <FiShoppingCart size={20} />
-                {count > 0 && <span className="cart-badge">{count}</span>}
-              </Link>
-              <Link to="/messages" className="icon-btn" aria-label="Messages">
-                <FiMessageSquare size={20} />
-              </Link>
+          <div className="navbar-links" aria-label="Marketplace pages">
+            {NAV_LINKS.map((link) => (
               <Link
-                to="/notifications"
-                className="icon-btn"
-                aria-label="Notifications"
+                key={link.to}
+                to={link.to}
+                className={`nav-link ${isActiveRoute(link.to) ? "active" : ""}`}
+                aria-current={isActiveRoute(link.to) ? "page" : undefined}
               >
-                <FiBell size={20} />
+                {link.label}
               </Link>
-            </>
-          )}
+            ))}
+          </div>
 
-          {user ? (
-            <div className="user-menu">
-              <button
-                className="user-avatar-btn"
-                onClick={() => setDropdownOpen((p) => !p)}
-              >
-                {user.avatar_url ? (
-                  <img
-                    src={user.avatar_url}
-                    alt={user.name}
-                    className="avatar-img"
+          <form className="navbar-search" onSubmit={handleSearch} role="search">
+            <FiSearch aria-hidden="true" />
+            <label className="sr-only" htmlFor="navbar-search-input">
+              Search products, stalls, or events
+            </label>
+            <input
+              id="navbar-search-input"
+              type="search"
+              placeholder="Search campus marketplace"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+            <button type="submit" aria-label="Submit search">
+              <FiSearch aria-hidden="true" />
+            </button>
+          </form>
+
+          <div className="navbar-actions">
+            {user?.role === "buyer" && (
+              <div className="navbar-utilities" aria-label="Buyer shortcuts">
+                <Link
+                  to="/cart"
+                  className="icon-btn"
+                  aria-label={`Cart, ${numericCartCount} items`}
+                  title="Cart"
+                >
+                  <FiShoppingCart />
+                  {numericCartCount > 0 && (
+                    <span className="cart-badge">{cartCount}</span>
+                  )}
+                </Link>
+                <Link
+                  to="/messages"
+                  className="icon-btn"
+                  aria-label="Messages"
+                  title="Messages"
+                >
+                  <FiMessageSquare />
+                </Link>
+                <Link
+                  to="/notifications"
+                  className="icon-btn"
+                  aria-label="Notifications"
+                  title="Notifications"
+                >
+                  <FiBell />
+                </Link>
+              </div>
+            )}
+
+            {user ? (
+              <div className="user-menu" ref={userMenuRef}>
+                <button
+                  type="button"
+                  className="user-avatar-btn"
+                  onClick={() => setDropdownOpen((open) => !open)}
+                  aria-haspopup="menu"
+                  aria-expanded={dropdownOpen}
+                  aria-controls="account-dropdown"
+                >
+                  {user.avatar_url ? (
+                    <img src={user.avatar_url} alt="" className="avatar-img" />
+                  ) : (
+                    <span className="avatar-initials" aria-hidden="true">
+                      {userInitial}
+                    </span>
+                  )}
+                  <span className="user-info-nav">
+                    <span className="user-name-nav">{firstName}</span>
+                    <span className="user-role-nav">{roleLabel}</span>
+                  </span>
+                  <FiChevronDown
+                    className={`user-menu-chevron ${dropdownOpen ? "open" : ""}`}
+                    aria-hidden="true"
                   />
-                ) : (
-                  <div className="avatar-initials">
-                    {user.name?.charAt(0).toUpperCase()}
+                </button>
+
+                {dropdownOpen && (
+                  <div id="account-dropdown" className="dropdown" role="menu">
+                    <div className="dropdown-header">
+                      <span className="dropdown-avatar" aria-hidden="true">
+                        {userInitial}
+                      </span>
+                      <div>
+                        <p>{displayName}</p>
+                        <span>{user.email}</span>
+                      </div>
+                    </div>
+
+                    <div className="dropdown-separator" />
+                    {user.status !== "approved" && <Link to="/account-status" className="dropdown-item" role="menuitem">Registration approval status</Link>}
+                    {user.role === "buyer" && user.status === "approved" && <Link to="/open-store" className="dropdown-item" role="menuitem">Open a campus store</Link>}
+
+                    {user.role === "buyer" && (
+                      <>
+                        <Link
+                          to="/orders"
+                          className="dropdown-item"
+                          role="menuitem"
+                        >
+                          <FiPackage /> My orders
+                        </Link>
+                        <Link
+                          to="/favorites"
+                          className="dropdown-item"
+                          role="menuitem"
+                        >
+                          <FiHeart /> Favorites
+                        </Link>
+                        <Link
+                          to="/messages"
+                          className="dropdown-item"
+                          role="menuitem"
+                        >
+                          <FiMessageSquare /> Messages
+                        </Link>
+                      </>
+                    )}
+
+                    {user.role === "seller" && (
+                      <Link
+                        to="/seller"
+                        className="dropdown-item"
+                        role="menuitem"
+                      >
+                        <FiGrid /> Seller dashboard
+                      </Link>
+                    )}
+
+                    {(user.role === "admin" || user.role === "super_admin") && (
+                      <Link
+                        to="/admin"
+                        className="dropdown-item"
+                        role="menuitem"
+                      >
+                        <FiGrid /> Admin panel
+                      </Link>
+                    )}
+
+                    <div className="dropdown-separator" />
+                    <button
+                      type="button"
+                      className="dropdown-item danger"
+                      onClick={handleLogout}
+                      role="menuitem"
+                    >
+                      <FiLogOut /> Log out
+                    </button>
                   </div>
                 )}
-                <div className="user-info-nav">
-                  <span className="user-name-nav">
-                    {user.name.split(" ")[0]}
-                  </span>
-                  <span className="user-role-nav">
-                    {user.role === "admin"
-                      ? "Administrator"
-                      : user.role === "seller"
-                        ? "Seller"
-                        : "Buyer"}
-                  </span>
-                </div>
-                <FiChevronDown size={14} />
-              </button>
+              </div>
+            ) : (
+              <div className="auth-btns">
+                <Link to="/login" className="btn btn-ghost btn-sm">
+                  Log in
+                </Link>
+                <Link to="/register" className="btn btn-primary btn-sm">
+                  Create account
+                </Link>
+              </div>
+            )}
 
-              {dropdownOpen && (
-                <div
-                  className="dropdown"
-                  onClick={() => setDropdownOpen(false)}
-                >
-                  <div className="dropdown-header">
-                    <p className="font-semibold">{user.name}</p>
-                    <p className="text-sm text-muted">{user.email}</p>
+            <button
+              type="button"
+              className="mobile-menu-btn"
+              onClick={() => setMobileOpen((open) => !open)}
+              aria-label={
+                mobileOpen ? "Close navigation menu" : "Open navigation menu"
+              }
+              aria-expanded={mobileOpen}
+              aria-controls="mobile-navigation"
+            >
+              {mobileOpen ? <FiX /> : <FiMenu />}
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {mobileOpen && (
+        <>
+          <button
+            type="button"
+            className="mobile-menu-backdrop"
+            onClick={() => setMobileOpen(false)}
+            aria-label="Close navigation menu"
+          />
+          <div id="mobile-navigation" className="mobile-menu">
+            <form
+              className="mobile-search"
+              onSubmit={handleSearch}
+              role="search"
+            >
+              <FiSearch aria-hidden="true" />
+              <input
+                type="search"
+                placeholder="Search the marketplace"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                aria-label="Search products, stalls, or events"
+                autoFocus
+              />
+              <button type="submit" aria-label="Submit search">
+                <FiSearch />
+              </button>
+            </form>
+
+            <div className="mobile-nav-section">
+              <span className="mobile-nav-label">Explore</span>
+              {NAV_LINKS.map((link) => {
+                const LinkIcon = link.icon;
+                const active = isActiveRoute(link.to);
+                return (
+                  <Link
+                    key={link.to}
+                    to={link.to}
+                    className={`mobile-nav-link ${active ? "active" : ""}`}
+                    aria-current={active ? "page" : undefined}
+                  >
+                    <LinkIcon />
+                    <span>{link.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+
+            {user?.role === "buyer" && (
+              <div className="mobile-nav-section">
+                <span className="mobile-nav-label">Your account</span>
+                <Link to="/cart" className="mobile-nav-link">
+                  <FiShoppingCart />
+                  <span>Cart</span>
+                  {numericCartCount > 0 && (
+                    <strong className="mobile-link-count">{cartCount}</strong>
+                  )}
+                </Link>
+                <Link to="/orders" className="mobile-nav-link">
+                  <FiPackage />
+                  <span>My orders</span>
+                </Link>
+                <Link to="/favorites" className="mobile-nav-link">
+                  <FiHeart />
+                  <span>Favorites</span>
+                </Link>
+                <Link to="/messages" className="mobile-nav-link">
+                  <FiMessageSquare />
+                  <span>Messages</span>
+                </Link>
+                <Link to="/notifications" className="mobile-nav-link">
+                  <FiBell />
+                  <span>Notifications</span>
+                </Link>
+              </div>
+            )}
+
+            {user?.role === "seller" && (
+              <Link
+                to="/seller"
+                className="mobile-nav-link mobile-dashboard-link"
+              >
+                <FiGrid />
+                <span>Seller dashboard</span>
+              </Link>
+            )}
+
+            {(user?.role === "admin" || user?.role === "super_admin") && (
+              <Link
+                to="/admin"
+                className="mobile-nav-link mobile-dashboard-link"
+              >
+                <FiGrid />
+                <span>Admin panel</span>
+              </Link>
+            )}
+
+            <div className="mobile-menu-footer">
+              {user ? (
+                <>
+                  <div className="mobile-user-summary">
+                    <span className="avatar-initials">{userInitial}</span>
+                    <div>
+                      <strong>{displayName}</strong>
+                      <span>{roleLabel}</span>
+                    </div>
                   </div>
-                  <div className="divider" style={{ margin: "0.5rem 0" }} />
-                  {user.role === "buyer" && (
-                    <>
-                      <Link to="/orders" className="dropdown-item">
-                        <FiPackage /> My Orders
-                      </Link>
-                      <Link to="/favorites" className="dropdown-item">
-                        <FiHeart /> Favorites
-                      </Link>
-                      <Link to="/messages" className="dropdown-item">
-                        <FiMessageSquare /> Messages
-                      </Link>
-                    </>
-                  )}
-                  {user.role === "seller" && (
-                    <Link to="/seller" className="dropdown-item">
-                      <FiGrid /> Seller Dashboard
-                    </Link>
-                  )}
-                  {user.role === "admin" && (
-                    <Link to="/admin" className="dropdown-item">
-                      <FiGrid /> Admin Panel
-                    </Link>
-                  )}
-                  <div className="divider" style={{ margin: "0.5rem 0" }} />
                   <button
-                    className="dropdown-item danger"
+                    type="button"
+                    className="mobile-logout-btn"
                     onClick={handleLogout}
                   >
-                    <FiLogOut /> Logout
+                    <FiLogOut /> Log out
                   </button>
+                </>
+              ) : (
+                <div className="mobile-auth-actions">
+                  <Link to="/login" className="btn btn-outline">
+                    Log in
+                  </Link>
+                  <Link to="/register" className="btn btn-primary">
+                    Create account
+                  </Link>
                 </div>
               )}
             </div>
-          ) : (
-            <div className="auth-btns">
-              <Link to="/login" className="btn btn-outline btn-sm">
-                Login
-              </Link>
-              <Link to="/register" className="btn btn-primary btn-sm">
-                Sign Up
-              </Link>
-            </div>
-          )}
-
-          <button
-            className="mobile-menu-btn"
-            onClick={() => setMobileOpen((p) => !p)}
-          >
-            {mobileOpen ? <FiX size={22} /> : <FiMenu size={22} />}
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile menu */}
-      {mobileOpen && (
-        <div className="mobile-menu" onClick={() => setMobileOpen(false)}>
-          <form className="mobile-search" onSubmit={handleSearch}>
-            <FiSearch size={18} />
-            <input
-              type="search"
-              placeholder="Search..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </form>
-          {navLinks.map((l) => (
-            <Link key={l.to} to={l.to} className="mobile-nav-link">
-              <FiHome /> {l.label}
-            </Link>
-          ))}
-          {user ? (
-            <button className="mobile-nav-link danger" onClick={handleLogout}>
-              <FiLogOut /> Logout
-            </button>
-          ) : (
-            <>
-              <Link to="/login" className="mobile-nav-link">
-                Login
-              </Link>
-              <Link to="/register" className="mobile-nav-link">
-                Sign Up
-              </Link>
-            </>
-          )}
-        </div>
+          </div>
+        </>
       )}
-
-      <style>{`
-        .navbar {
-          position: sticky; top: 0; z-index: 100;
-          background: #fff;
-          border-bottom: 1px solid var(--gray-200);
-          box-shadow: var(--shadow-sm);
-        }
-        .navbar-inner {
-          display: flex; align-items: center;
-          height: var(--navbar-height); gap: 1.25rem;
-        }
-        .navbar-brand {
-          display: flex; align-items: center; gap: 0.5rem;
-          white-space: nowrap;
-        }
-        .brand-icon { font-size: 1.6rem; }
-        .brand-text {
-          font-size: 0.85rem; font-weight: 800; line-height: 1.05;
-          color: var(--green-800, #0b3d1e); letter-spacing: 0.2px;
-        }
-        .navbar-links { display: flex; gap: 0.25rem; flex-shrink: 0; }
-        .nav-link {
-          padding: 0.4rem 0.875rem; border-radius: var(--radius-md);
-          font-size: 0.9rem; font-weight: 600; color: var(--gray-600);
-          transition: var(--transition-fast);
-        }
-        .nav-link:hover, .nav-link.active {
-          background: var(--color-primary-light); color: var(--color-primary);
-        }
-        .navbar-search {
-          flex: 1; display: flex; align-items: center; gap: 0.5rem; max-width: 380px;
-          background: var(--gray-50, #f3f4f3); border: 1px solid var(--gray-200);
-          border-radius: 999px; padding: 0.5rem 1rem; color: var(--gray-500);
-        }
-        .navbar-search input { border: none; background: none; outline: none; flex: 1; font-size: 0.875rem; }
-        .navbar-actions { display: flex; align-items: center; gap: 0.375rem; margin-left: auto; }
-        .icon-btn {
-          position: relative; padding: 0.5rem; border-radius: 999px;
-          color: var(--gray-600); transition: var(--transition-fast);
-          display: flex; align-items: center;
-        }
-        .icon-btn:hover { background: var(--gray-100); color: var(--color-primary); }
-        .cart-badge {
-          position: absolute; top: -2px; right: -2px;
-          background: var(--color-primary); color: #fff;
-          font-size: 0.65rem; font-weight: 700;
-          width: 18px; height: 18px; border-radius: 50%;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .user-menu { position: relative; margin-left: 0.25rem; }
-        .user-avatar-btn {
-          display: flex; align-items: center; gap: 0.5rem;
-          padding: 0.3rem 0.6rem; border-radius: 999px;
-          border: none; background: none;
-          transition: var(--transition-fast); font-size: 0.875rem;
-        }
-        .user-avatar-btn:hover { background: var(--gray-100); }
-        .avatar-img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
-        .avatar-initials {
-          width: 32px; height: 32px; border-radius: 50%;
-          background: var(--color-primary); color: #fff;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 0.8rem; font-weight: 700;
-        }
-        .user-info-nav { display: flex; flex-direction: column; line-height: 1.15; text-align: left; }
-        .user-name-nav { font-weight: 600; color: var(--gray-900); font-size: 0.85rem; }
-        .user-role-nav { font-size: 0.7rem; color: var(--gray-500); }
-        .dropdown {
-          position: absolute; right: 0; top: calc(100% + 8px);
-          background: #fff; border: 1px solid var(--gray-200);
-          border-radius: var(--radius-xl); box-shadow: var(--shadow-xl);
-          min-width: 220px; z-index: 200; padding: 0.5rem;
-          animation: fadeIn 0.15s ease;
-        }
-        .dropdown-header { padding: 0.625rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; }
-        .dropdown-item {
-          display: flex; align-items: center; gap: 0.625rem;
-          padding: 0.625rem 0.75rem; border-radius: var(--radius-md);
-          font-size: 0.875rem; color: var(--gray-700); width: 100%;
-          transition: var(--transition-fast);
-        }
-        .dropdown-item:hover { background: var(--gray-100); }
-        .dropdown-item.danger { color: var(--color-danger); }
-        .dropdown-item.danger:hover { background: var(--color-danger-light); }
-        .auth-btns { display: flex; gap: 0.5rem; }
-        .mobile-menu-btn { display: none; padding: 0.5rem; border-radius: var(--radius-md); color: var(--gray-600); }
-        .mobile-menu {
-          display: none; flex-direction: column; gap: 0.25rem;
-          padding: 0.75rem 1.5rem 1rem; border-top: 1px solid var(--gray-200);
-        }
-        .mobile-search {
-          display: flex; align-items: center; gap: 0.5rem;
-          background: var(--gray-50); border: 1px solid var(--gray-200);
-          border-radius: 999px; padding: 0.5rem 1rem; margin-bottom: 0.5rem; color: var(--gray-500);
-        }
-        .mobile-search input { border: none; background: none; outline: none; flex: 1; font-size: 0.875rem; }
-        .mobile-nav-link {
-          display: flex; align-items: center; gap: 0.75rem;
-          padding: 0.75rem 0.5rem; font-size: 0.9rem; font-weight: 500;
-          color: var(--gray-700); border-radius: var(--radius-md);
-        }
-        .mobile-nav-link.danger { color: var(--color-danger); }
-        @media (max-width: 900px) {
-          .navbar-links { display: none; }
-        }
-        @media (max-width: 768px) {
-          .navbar-search { display: none; }
-          .user-info-nav { display: none; }
-          .mobile-menu-btn { display: flex; }
-          .mobile-menu { display: flex; }
-          .auth-btns .btn:first-child { display: none; }
-        }
-        .full-center {
-          display: flex; align-items: center; justify-content: center;
-          min-height: 100vh;
-        }
-      `}</style>
-    </nav>
+    </header>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Sidebar from "../../components/common/Sidebar.jsx";
-import { EmptyState } from "../../components/common/UI.jsx";
+import { EmptyState } from "../../components/common/Ui.jsx";
 import { adminService } from "../../services/api.js";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
@@ -16,10 +16,16 @@ export default function ManageUsers() {
   const [roleFilter, setRoleFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [banningId, setBanningId] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("pending");
+  const [review, setReview] = useState(null);
+  const [note, setNote] = useState("");
+  const [checked, setChecked] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   const fetchUsers = useCallback(() => {
     setLoading(true);
     const params = { page, limit: 20, q: search };
+    if (statusFilter !== "all") params.status = statusFilter;
     if (roleFilter !== "all") params.role = roleFilter;
 
     adminService
@@ -30,7 +36,7 @@ export default function ManageUsers() {
       })
       .catch(() => toast.error("Failed to load users"))
       .finally(() => setLoading(false));
-  }, [page, search, roleFilter]);
+  }, [page, search, roleFilter, statusFilter]);
 
   useEffect(fetchUsers, [fetchUsers]);
 
@@ -56,6 +62,15 @@ export default function ManageUsers() {
     } finally {
       setBanningId(null);
     }
+  };
+
+  const submitReview = async (status) => {
+    setReviewing(true);
+    try {
+      await adminService.reviewUser(review.id, { status, note, credentials_checked: checked });
+      setReview(null); fetchUsers(); toast.success(`Registration ${status}`);
+    } catch (error) { toast.error(error.response?.data?.error || "Review failed"); }
+    finally { setReviewing(false); }
   };
 
   const roleColor = { buyer: "gold", seller: "green", admin: "danger" };
@@ -122,6 +137,24 @@ export default function ManageUsers() {
             </button>
           </div>
 
+          <label className="form-label">Registration status
+            <select className="form-input" style={{ maxWidth: 280, marginBottom: "1rem" }} value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
+              <option value="pending">Pending review</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="all">All registrations</option>
+            </select>
+          </label>
+          {review && <section className="card" style={{ padding: "1.5rem", marginBottom: "1rem" }} aria-labelledby="review-title">
+            <h2 id="review-title">Review {review.name}</h2>
+            <p>{review.role} · {review.affiliation || "Affiliation missing"} · {review.department || "Department missing"}</p>
+            <p><strong>CSUCC ID:</strong> {review.campus_id || "Not provided"}</p>
+            <p>Check this identity against authorized CSUCC enrollment or personnel records before approval.</p>
+            <label style={{ display: "flex", gap: ".5rem", margin: "1rem 0" }}><input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} /> I verified the ID, name, and current CSUCC membership.</label>
+            <label>Review note / reason<textarea className="form-input" value={note} minLength={5} maxLength={500} onChange={(e) => setNote(e.target.value)} placeholder="Record the verification method or explain what needs correction." /></label>
+            <div style={{ display: "flex", gap: ".75rem", marginTop: "1rem", flexWrap: "wrap" }}>
+              <button className="btn btn-primary" disabled={reviewing || !checked || !review.campus_id || note.trim().length < 5} onClick={() => submitReview("approved")}>Approve registration</button>
+              <button className="btn btn-danger" disabled={reviewing || note.trim().length < 5} onClick={() => submitReview("rejected")}>Request correction</button>
+              <button className="btn btn-outline" disabled={reviewing} onClick={() => setReview(null)}>Close</button>
+            </div>
+          </section>}
           {/* Users table */}
           {loading ? (
             <div
@@ -202,13 +235,14 @@ export default function ManageUsers() {
                           <span
                             className={`badge ${user.is_banned ? "badge-danger" : "badge-success"}`}
                           >
-                            {user.is_banned ? "Banned" : "Active"}
+                            {user.is_banned ? "Banned" : user.status}
                           </span>
                         </td>
                         <td className="text-sm text-muted">
                           {format(new Date(user.created_at), "MMM d, yyyy")}
                         </td>
                         <td style={{ textAlign: "right" }}>
+                          {user.status === "pending" && user.role !== "admin" && <button className="btn btn-primary btn-sm" onClick={() => { setReview(user); setNote(""); setChecked(false); }}>Review credentials</button>}
                           {user.role !== "admin" && (
                             <button
                               className={`btn btn-sm ${user.is_banned ? "btn-outline" : "btn-danger"}`}

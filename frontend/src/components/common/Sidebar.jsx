@@ -1,79 +1,218 @@
-import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ChevronDown, LogOut } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { ChevronRight, LogOut, Menu, ShieldCheck, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.jsx";
-import { ADMIN_NAV, SELLER_NAV, ROLE_LABELS } from "../../config/navigation.js";
+import {
+  ADMIN_NAV,
+  BUYER_NAV,
+  ROLE_LABELS,
+  SELLER_NAV,
+} from "../../config/navigation.js";
+import "./Sidebar.css";
 
-export default function Sidebar({ mobileOpen, onMobileClose }) {
+const NAVIGATION = {
+  admin: ADMIN_NAV,
+  buyer: BUYER_NAV,
+  seller: SELLER_NAV,
+};
+
+const GROUP_LABELS = {
+  seller: [
+    ["Workspace", ["Dashboard", "My Stall", "Products", "Point of Sale", "Orders"]],
+    ["Growth", ["Events & Reservations", "Analytics", "Messages"]],
+    ["Account", ["Reviews", "Settings"]],
+  ],
+  admin: [
+    ["Overview", ["Dashboard", "Analytics", "Reports"]],
+    ["Management", ["Registration & Users", "Stores & Plans"]],
+    ["Operations", ["Events", "Stall Map", "Reservations", "Complaints"]],
+    ["Account", ["Settings"]],
+  ],
+  buyer: [["Marketplace", []]],
+};
+
+const getInitials = (value) =>
+  String(value || "CM")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+export default function Sidebar({ open, isOpen: legacyOpen, onClose }) {
   const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
 
-  const links = user?.role === "admin" ? ADMIN_NAV : SELLER_NAV;
-  const roleLabel = ROLE_LABELS[user?.role] || user?.role;
+  const role = user?.role || "seller";
+  const navItems = NAVIGATION[role] || SELLER_NAV;
+  const controlledOpen = typeof open === "boolean" ? open : legacyOpen;
+  const isControlled = typeof controlledOpen === "boolean";
+  const isOpen = (isControlled && controlledOpen) || internalOpen;
 
-  const isActive = (path) => {
-    if (path === "/seller" || path === "/admin") {
-      return location.pathname === path;
-    }
-    return location.pathname.startsWith(path);
+  const closeSidebar = () => {
+    setInternalOpen(false);
+    if (isControlled) onClose?.();
   };
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
+  useEffect(() => {
+    closeSidebar();
+  }, [location.pathname]);
+
+  const groups = useMemo(() => {
+    const definitions = GROUP_LABELS[role] || GROUP_LABELS.seller;
+    const assigned = new Set();
+
+    const result = definitions.map(([label, names]) => {
+      const items = names.length
+        ? navItems.filter((item) => names.includes(item.label))
+        : navItems;
+      items.forEach((item) => assigned.add(item.to));
+      return { label, items };
+    });
+
+    const remaining = navItems.filter((item) => !assigned.has(item.to));
+    if (remaining.length)
+      result.splice(-1, 0, { label: "More", items: remaining });
+    return result.filter((group) => group.items.length);
+  }, [navItems, role]);
+
+  const name = user?.name || user?.full_name || "Campus User";
+  const avatar = user?.avatar_url || user?.profile_image;
+  const homePath =
+    role === "admin" ? "/admin" : role === "seller" ? "/seller" : "/";
+  const profilePath = role === "seller" ? "/seller/settings" : homePath;
+
+  const handleLogout = async () => {
+    try {
+      await logout?.();
+    } finally {
+      localStorage.removeItem("accessToken");
+      navigate("/login", { replace: true });
+    }
   };
 
   return (
-    <aside className={`cm-sidebar ${mobileOpen ? "cm-sidebar--open" : ""}`}>
-      <div className="cm-sidebar-brand">
-        <Link to="/" className="cm-sidebar-logo" onClick={onMobileClose}>
-          <img src="/logo.png" alt="Campus Market" />
-          <span>CAMPUS MARKET</span>
-        </Link>
-      </div>
-
+    <>
       <button
         type="button"
-        className="cm-sidebar-user"
-        onClick={() => setUserMenuOpen((p) => !p)}
-        aria-expanded={userMenuOpen}
+        className="cm-sidebar-mobile-trigger"
+        onClick={() => setInternalOpen(true)}
+        aria-label="Open navigation"
+        aria-expanded={isOpen}
       >
-        <div className="cm-sidebar-avatar">
-          {user?.avatar_url ? (
-            <img src={user.avatar_url} alt={user.name} />
-          ) : (
-            <span>{user?.name?.charAt(0).toUpperCase()}</span>
-          )}
-        </div>
-        <div className="cm-sidebar-user-info">
-          <p className="cm-sidebar-user-name">{user?.name}</p>
-          <p className="cm-sidebar-user-role">{roleLabel}</p>
-        </div>
-        <ChevronDown size={16} className={`cm-sidebar-chevron ${userMenuOpen ? "open" : ""}`} />
+        <Menu size={20} />
       </button>
 
-      <nav className="cm-sidebar-nav" aria-label="Main navigation">
-        {links.map(({ to, label, icon: Icon }) => (
+      <aside className={`cm-sidebar ${isOpen ? "cm-sidebar--open" : ""}`}>
+        <div className="cm-sidebar-brand">
           <Link
-            key={to}
-            to={to}
-            className={`cm-sidebar-link ${isActive(to) ? "active" : ""}`}
-            onClick={onMobileClose}
+            to={homePath}
+            className={`cm-sidebar-logo${role === "seller" ? " cm-sidebar-logo--seller" : ""}`}
+            aria-label="Campus Market dashboard"
           >
-            <Icon size={20} strokeWidth={1.75} aria-hidden="true" />
-            <span>{label}</span>
+            {role === "seller" ? (
+              <img
+                className="cm-sidebar-seller-wordmark"
+                src="/images/buyer/campusmarket-logo.png"
+                alt="Campus Market"
+              />
+            ) : (
+              <>
+                <span className="cm-sidebar-logo-mark">
+                  <img src="/logo.png" alt="" />
+                </span>
+                <span className="cm-sidebar-brand-copy">
+                  <strong>Campus Market</strong>
+                  <small>{ROLE_LABELS[role] || role} workspace</small>
+                </span>
+              </>
+            )}
           </Link>
-        ))}
-      </nav>
+          <button
+            type="button"
+            className="cm-sidebar-close"
+            onClick={closeSidebar}
+            aria-label="Close navigation"
+          >
+            <X size={19} />
+          </button>
+        </div>
 
-      <div className="cm-sidebar-footer">
-        <button type="button" className="cm-sidebar-link cm-sidebar-link--logout" onClick={handleLogout}>
-          <LogOut size={20} strokeWidth={1.75} aria-hidden="true" />
-          <span>Logout</span>
-        </button>
-      </div>
-    </aside>
+        <Link to={profilePath} className="cm-sidebar-user">
+          <span className="cm-sidebar-avatar">
+            {avatar ? <img src={avatar} alt="" /> : getInitials(name)}
+            <i aria-label="Online" />
+          </span>
+          <span className="cm-sidebar-user-info">
+            <strong className="cm-sidebar-user-name">{name}</strong>
+            <small className="cm-sidebar-user-role">
+              <ShieldCheck size={12} /> {ROLE_LABELS[role] || role}
+            </small>
+          </span>
+          <ChevronRight className="cm-sidebar-chevron" size={16} />
+        </Link>
+
+        <nav
+          className="cm-sidebar-nav"
+          aria-label={`${ROLE_LABELS[role] || role} navigation`}
+        >
+          {groups.map((group) => (
+            <div className="cm-sidebar-group" key={group.label}>
+              <p className="cm-sidebar-group-label">{group.label}</p>
+              <div className="cm-sidebar-group-links">
+                {group.items.map(({ to, label, icon: Icon }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={to === homePath}
+                    className={({ isActive }) =>
+                      `cm-sidebar-link ${isActive ? "active" : ""}`
+                    }
+                  >
+                    <span className="cm-sidebar-link-icon">
+                      <Icon size={18} />
+                    </span>
+                    <span>{label}</span>
+                    <i className="cm-sidebar-active-dot" />
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        <div className="cm-sidebar-footer">
+          <div className="cm-sidebar-secure-note">
+            <ShieldCheck size={15} />
+            <span>
+              <strong>Secure workspace</strong>
+              <small>Your seller data is protected</small>
+            </span>
+          </div>
+          <button
+            type="button"
+            className="cm-sidebar-link cm-sidebar-link--logout"
+            onClick={handleLogout}
+          >
+            <span className="cm-sidebar-link-icon">
+              <LogOut size={18} />
+            </span>
+            <span>Log out</span>
+          </button>
+        </div>
+      </aside>
+
+      {isOpen && (
+        <button
+          type="button"
+          className="sidebar-overlay"
+          onClick={closeSidebar}
+          aria-label="Close navigation"
+        />
+      )}
+    </>
   );
 }

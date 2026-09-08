@@ -1,231 +1,477 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Search, Star } from "lucide-react";
+import {
+  ArrowUpDown,
+  BadgeCheck,
+  ChevronRight,
+  ArrowRight,
+  MapPin,
+  MessageCircle,
+  ShoppingBag,
+  Package,
+  RefreshCw,
+  Search,
+  Star,
+  Store,
+  X,
+} from "lucide-react";
 import Navbar from "../../components/common/Navbar.jsx";
-import { SkeletonGrid } from "../../components/common/UI.jsx";
+import { stallService } from "../../services/api.js";
+import "./Stalls.css";
 
-const CATEGORIES = [
-  { key: "all", label: "All" },
-  { key: "food", label: "Food Stall" },
-  { key: "merchandise", label: "Merchandise" },
-  { key: "mixed", label: "Mixed-Use" },
-];
+const CATEGORY_LABELS = {
+  food: "Food Stall",
+  merchandise: "Merchandise",
+  mixed: "Mixed-Use",
+  services: "Services",
+  other: "Other",
+};
 
-// TODO: replace with stallService.getAll({ category, q }) once that endpoint exists
-const MOCK_STALLS = [
-  {
-    id: 1,
-    name: "Sweet Finds PH",
-    category: "food",
-    categoryLabel: "Food Stall",
-    rating: 4.8,
-    reviews: 132,
-    logo: null,
-    tagline: "Homemade pastries & bread",
-  },
-  {
-    id: 2,
-    name: "Crafty Hands",
-    category: "merchandise",
-    categoryLabel: "Merchandise",
-    rating: 4.9,
-    reviews: 87,
-    logo: null,
-    tagline: "Handmade keychains & accessories",
-  },
-  {
-    id: 3,
-    name: "Brew Corner",
-    category: "food",
-    categoryLabel: "Food Stall",
-    rating: 4.7,
-    reviews: 210,
-    logo: null,
-    tagline: "Coffee, tea, and pastries",
-  },
-  {
-    id: 4,
-    name: "Campus Threads",
-    category: "mixed",
-    categoryLabel: "Mixed-Use",
-    rating: 4.6,
-    reviews: 54,
-    logo: null,
-    tagline: "Apparel and printed goods",
-  },
-  {
-    id: 5,
-    name: "Green Bloom",
-    category: "merchandise",
-    categoryLabel: "Merchandise",
-    rating: 4.9,
-    reviews: 41,
-    logo: null,
-    tagline: "Crochet flowers & plants",
-  },
-  {
-    id: 6,
-    name: "Cheese Central",
-    category: "food",
-    categoryLabel: "Food Stall",
-    rating: 4.8,
-    reviews: 176,
-    logo: null,
-    tagline: "Cheese pandesal & snacks",
-  },
-];
+const hiddenStatuses = new Set([
+  "pending",
+  "rejected",
+  "suspended",
+  "inactive",
+]);
+
+const extractStalls = (payload) => {
+  const value =
+    payload?.data?.stalls ?? payload?.stalls ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value : [];
+};
+
+const normalizeCategory = (value) => {
+  const raw = String(value || "other")
+    .trim()
+    .toLowerCase();
+  if (raw.includes("food")) return "food";
+  if (raw.includes("merch") || raw.includes("retail")) return "merchandise";
+  if (raw.includes("mixed")) return "mixed";
+  if (raw.includes("service")) return "services";
+  return raw.replace(/[^a-z0-9]+/g, "-") || "other";
+};
+
+const titleCase = (value) =>
+  String(value || "Other")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const normalizeStall = (record, index) => {
+  const stall = record?.stalls || record?.stall || record || {};
+  const category = normalizeCategory(stall.category || record?.category);
+  const products = Array.isArray(stall.products)
+    ? stall.products
+    : Array.isArray(record?.products)
+      ? record.products
+      : [];
+  const rating = Number(
+    stall.avg_rating ??
+      stall.rating ??
+      record?.avg_rating ??
+      record?.rating ??
+      0,
+  );
+  const reviews = Number(
+    stall.review_count ??
+      stall.reviews ??
+      record?.review_count ??
+      record?.reviews ??
+      0,
+  );
+
+  return {
+    id: stall.id || stall.stall_id || record?.stall_id || record?.id,
+    key: stall.id || record?.id || `stall-${index}`,
+    name: stall.name || record?.name || `Campus Stall ${index + 1}`,
+    category,
+    categoryLabel: CATEGORY_LABELS[category] || titleCase(category),
+    location: stall.location || stall.address || "CSU Cabadbaran Campus",
+    rating: Number.isFinite(rating) ? rating : 0,
+    reviews: Number.isFinite(reviews) ? reviews : 0,
+    logo:
+      stall.logo_url || stall.logo || record?.logo_url || record?.logo || null,
+    cover: stall.banner_url || stall.cover_url || record?.banner_url || null,
+    tagline:
+      stall.tagline ||
+      stall.description ||
+      record?.tagline ||
+      record?.description ||
+      "Discover products made and sold by students on campus.",
+    seller:
+      stall.profiles?.full_name ||
+      stall.seller?.name ||
+      stall.seller_name ||
+      record?.seller_name ||
+      record?.sellerName ||
+      "Campus seller",
+    productCount: Number(
+      stall.product_count ??
+        record?.product_count ??
+        record?.products_count ??
+        products.length,
+    ),
+    status: String(stall.status || record?.status || "approved").toLowerCase(),
+    verified:
+      Boolean(stall.is_verified ?? record?.is_verified) ||
+      ["approved", "active"].includes(
+        String(stall.status || record?.status || "").toLowerCase(),
+      ),
+  };
+};
+
+function StallCard({ stall }) {
+  const content = (
+    <>
+      <div
+        className={`market-stall-cover market-stall-cover-${stall.category}`}
+        style={
+          stall.cover ? { backgroundImage: `url(${stall.cover})` } : undefined
+        }
+      >
+        {!stall.cover && (
+          <div className="market-stall-storefront" aria-hidden="true">
+            {stall.logo ? (
+              <img className="market-stall-brand" src={stall.logo} alt="" loading="lazy" />
+            ) : (
+              <>
+                <Store />
+                <span>Made for campus life</span>
+              </>
+            )}
+          </div>
+        )}
+        <div className="market-stall-logo">
+          {stall.logo ? (
+            <img src={stall.logo} alt="" loading="lazy" />
+          ) : (
+            <span aria-hidden="true">{stall.name.charAt(0).toUpperCase()}</span>
+          )}
+        </div>
+        {stall.verified && (
+          <span className="market-stall-verified">
+            <BadgeCheck aria-hidden="true" /> Verified
+          </span>
+        )}
+      </div>
+
+      <div className="market-stall-card-body">
+        <div className="market-stall-title-row">
+          <div>
+            <span>{stall.categoryLabel}</span>
+            <h2>{stall.name}</h2>
+          </div>
+          {stall.id && <ChevronRight aria-hidden="true" />}
+        </div>
+
+        <p className="market-stall-seller">by {stall.seller}</p>
+        <p className="market-stall-tagline">{stall.tagline}</p>
+        <p className="market-stall-location"><MapPin aria-hidden="true" /> {stall.location}</p>
+
+        <div className="market-stall-footer">
+          <span className="market-stall-rating">
+            <Star fill="currentColor" aria-hidden="true" />
+            {stall.rating > 0 ? (
+              <>
+                <strong>{stall.rating.toFixed(1)}</strong>
+                <small>({stall.reviews})</small>
+              </>
+            ) : (
+              <small>No ratings yet</small>
+            )}
+          </span>
+          <span className="market-stall-products">
+            <Package aria-hidden="true" />
+            {stall.productCount > 0
+              ? `${stall.productCount} ${stall.productCount === 1 ? "product" : "products"}`
+              : "Explore products"}
+          </span>
+        </div>
+        {stall.id && <span className="market-stall-visit">Visit stall <ArrowRight aria-hidden="true" /></span>}
+      </div>
+    </>
+  );
+
+  return stall.id ? (
+    <Link to={`/stalls/${stall.id}`} className="market-stall-card">
+      {content}
+    </Link>
+  ) : (
+    <article className="market-stall-card">{content}</article>
+  );
+}
 
 export default function Stalls() {
   const [stalls, setStalls] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [activeCategory, setActiveCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [sortBy, setSortBy] = useState("featured");
 
-  useEffect(() => {
+  const loadStalls = useCallback(async () => {
     setLoading(true);
-    // TODO: swap for stallService.getAll({ category: activeCategory, q: searchTerm })
-    const timer = setTimeout(() => {
-      setStalls(MOCK_STALLS);
+    setError("");
+
+    try {
+      const { data } = await stallService.getAll();
+      const normalized = extractStalls(data)
+        .map(normalizeStall)
+        .filter((stall) => !hiddenStatuses.has(stall.status));
+      setStalls(normalized);
+    } catch (requestError) {
+      setStalls([]);
+      setError(
+        requestError.response?.data?.error ||
+          "We couldn't load the campus stalls. Please try again.",
+      );
+    } finally {
       setLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
+    }
   }, []);
 
-  const filtered = stalls.filter((s) => {
-    const matchesCategory =
-      activeCategory === "all" || s.category === activeCategory;
-    const matchesSearch = s.name
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
+  useEffect(() => {
+    loadStalls();
+  }, [loadStalls]);
+
+  const categories = useMemo(() => {
+    const counts = stalls.reduce((result, stall) => {
+      result[stall.category] = (result[stall.category] || 0) + 1;
+      return result;
+    }, {});
+
+    return [
+      { key: "all", label: "All", count: stalls.length },
+      ...Object.keys(counts)
+        .sort((a, b) =>
+          (CATEGORY_LABELS[a] || a).localeCompare(CATEGORY_LABELS[b] || b),
+        )
+        .map((key) => ({
+          key,
+          label: CATEGORY_LABELS[key] || titleCase(key),
+          count: counts[key],
+        })),
+    ];
+  }, [stalls]);
+
+  const filteredStalls = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    const matches = stalls.filter((stall) => {
+      const matchesCategory =
+        activeCategory === "all" || stall.category === activeCategory;
+      const haystack = [
+        stall.name,
+        stall.seller,
+        stall.tagline,
+        stall.categoryLabel,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return matchesCategory && (!query || haystack.includes(query));
+    });
+
+    return [...matches].sort((a, b) => {
+      if (sortBy === "rating")
+        return b.rating - a.rating || b.reviews - a.reviews;
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "products") return b.productCount - a.productCount;
+      return (
+        Number(b.verified) - Number(a.verified) ||
+        b.rating - a.rating ||
+        b.reviews - a.reviews
+      );
+    });
+  }, [activeCategory, searchTerm, sortBy, stalls]);
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setActiveCategory("all");
+  };
+
+  const verifiedCount = stalls.filter((stall) => stall.verified).length;
 
   return (
-    <div>
+    <div className="market-stalls-shell">
       <Navbar />
-      <div className="stalls-page">
-        <div className="stalls-header">
-          <div>
-            <h1>Browse Stalls</h1>
-            <p>Discover trusted sellers across campus</p>
-          </div>
-          <form className="stalls-search" onSubmit={(e) => e.preventDefault()}>
-            <Search size={18} />
-            <input
-              type="text"
-              placeholder="Search stalls..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </form>
-        </div>
 
-        <div className="stalls-filter-bar">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat.key}
-              className={`stalls-chip ${activeCategory === cat.key ? "active" : ""}`}
-              onClick={() => setActiveCategory(cat.key)}
+      <main className="market-stalls-page">
+        <header className="market-stalls-hero">
+          <div className="market-stalls-hero-copy">
+            <span className="market-stalls-eyebrow"><Store size={15} aria-hidden="true" /> Your campus marketplace</span>
+            <h1>Small stalls.<br />Big campus discoveries.</h1>
+            <p>
+              Shop from trusted entrepreneurs across CSUCC and support
+              businesses built by students.
+            </p>
+          </div>
+
+          <div
+            className="market-stalls-summary"
+            aria-label="Stall directory summary"
+          >
+            <div>
+              <Store aria-hidden="true" />
+              <span>
+                <strong>{loading || error ? "—" : stalls.length}</strong> campus stalls
+              </span>
+            </div>
+            <div>
+              <BadgeCheck aria-hidden="true" />
+              <span>
+                <strong>{loading || error ? "—" : verifiedCount}</strong> verified sellers
+              </span>
+            </div>
+          </div>
+        </header>
+
+        {!loading && !error && stalls.length > 0 && (
+          <section
+            className="market-stalls-controls"
+            aria-label="Stall filters"
+          >
+            <label className="market-stalls-search">
+              <Search aria-hidden="true" />
+              <input
+                type="search"
+                placeholder="Search stalls or sellers…"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                aria-label="Search stalls"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  aria-label="Clear search"
+                >
+                  <X aria-hidden="true" />
+                </button>
+              )}
+            </label>
+
+            <div
+              className="market-stalls-categories"
+              aria-label="Stall categories"
             >
-              {cat.label}
-            </button>
-          ))}
-        </div>
+              {categories.map((category) => (
+                <button
+                  type="button"
+                  key={category.key}
+                  className={activeCategory === category.key ? "active" : ""}
+                  onClick={() => setActiveCategory(category.key)}
+                  aria-pressed={activeCategory === category.key}
+                >
+                  {category.label} <span>{category.count}</span>
+                </button>
+              ))}
+            </div>
+
+            <label className="market-stalls-sort">
+              <ArrowUpDown aria-hidden="true" />
+              <span>Sort</span>
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+              >
+                <option value="featured">Featured</option>
+                <option value="rating">Top rated</option>
+                <option value="products">Most products</option>
+                <option value="name">Name A–Z</option>
+              </select>
+            </label>
+          </section>
+        )}
 
         {loading ? (
-          <SkeletonGrid count={6} />
-        ) : filtered.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-state-icon">🔍</div>
-            <h3>No stalls found</h3>
-            <p>Try a different search or category</p>
-          </div>
-        ) : (
-          <div className="stalls-grid">
-            {filtered.map((stall) => (
-              <Link
-                to={`/stalls/${stall.id}`}
-                key={stall.id}
-                className="stalls-card"
-              >
-                <div className="stalls-card-logo">
-                  {stall.logo ? (
-                    <img src={stall.logo} alt={stall.name} />
-                  ) : (
-                    stall.name.charAt(0)
-                  )}
-                </div>
-                <div className="stalls-card-body">
-                  <h3>{stall.name}</h3>
-                  <span className="stalls-card-category">
-                    {stall.categoryLabel}
-                  </span>
-                  <p className="stalls-card-tagline">{stall.tagline}</p>
-                  <div className="stalls-card-rating">
-                    <Star size={14} fill="#facc15" stroke="#facc15" />
-                    <span>{stall.rating}</span>
-                    <span className="stalls-card-reviews">
-                      ({stall.reviews})
-                    </span>
-                  </div>
-                </div>
-              </Link>
+          <div className="market-stalls-skeleton" aria-label="Loading stalls">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index}>
+                <span />
+                <i />
+                <i />
+                <i />
+              </div>
             ))}
           </div>
+        ) : error ? (
+          <section className="market-stalls-state is-error">
+            <span>
+              <Store aria-hidden="true" />
+            </span>
+            <small>Unable to load</small>
+            <h2>We couldn't open the stall directory</h2>
+            <p>{error}</p>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={loadStalls}
+            >
+              <RefreshCw size={16} aria-hidden="true" /> Try again
+            </button>
+          </section>
+        ) : stalls.length === 0 ? (
+          <section className="market-stalls-state">
+            <span>
+              <Store aria-hidden="true" />
+            </span>
+            <small>Directory</small>
+            <h2>No active stalls yet</h2>
+            <p>
+              Approved campus sellers will appear here once their stalls are
+              ready.
+            </p>
+          </section>
+        ) : filteredStalls.length === 0 ? (
+          <section className="market-stalls-state compact">
+            <span>
+              <Search aria-hidden="true" />
+            </span>
+            <h2>No stalls matched your search</h2>
+            <p>Try a different keyword or browse all stall categories.</p>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={clearFilters}
+            >
+              Clear filters
+            </button>
+          </section>
+        ) : (
+          <section aria-label="Stall directory results">
+            <div className="market-stalls-heading">
+              <div>
+                <small>Explore the market</small>
+                <h2 aria-live="polite" aria-atomic="true">
+                  {filteredStalls.length} stall
+                  {filteredStalls.length === 1 ? "" : "s"}
+                </h2>
+              </div>
+              {searchTerm || activeCategory !== "all" ? (
+                <button type="button" className="market-stalls-reset" onClick={clearFilters}>
+                  <X size={15} aria-hidden="true" /> Clear filters
+                </button>
+              ) : <p>Find your next campus favorite</p>}
+            </div>
+            <div className="market-stalls-directory">
+            <div className={`market-stalls-grid${filteredStalls.length === 1 ? " market-stalls-grid--single" : ""}`}>
+              {filteredStalls.map((stall) => (
+                <StallCard key={stall.key} stall={stall} />
+              ))}
+            </div>
+            <aside className="market-stalls-guide" aria-labelledby="stall-guide-title">
+              <span className="market-stalls-guide-icon"><ShoppingBag aria-hidden="true" /></span>
+              <h2 id="stall-guide-title">Shop local. Start here.</h2>
+              <p>Get to know the people behind your campus favorites.</p>
+              <ol>
+                <li><Store aria-hidden="true" /><div><strong>Discover a stall</strong><span>Find something that fits your taste.</span></div></li>
+                <li><Package aria-hidden="true" /><div><strong>Explore its products</strong><span>Check prices and product details.</span></div></li>
+                <li><MessageCircle aria-hidden="true" /><div><strong>Connect with the seller</strong><span>Ask questions before you order.</span></div></li>
+              </ol>
+              <Link to="/browse">Browse all products <ArrowRight size={16} aria-hidden="true" /></Link>
+            </aside>
+            </div>
+          </section>
         )}
-      </div>
-
-      <style>{`
-        .stalls-page { max-width: 1400px; margin: 0 auto; padding: 1.75rem 1.5rem 4rem; }
-        .stalls-header {
-          display: flex; align-items: center; justify-content: space-between; gap: 1.5rem;
-          margin-bottom: 1.25rem; flex-wrap: wrap;
-        }
-        .stalls-header h1 { font-size: 1.5rem; font-weight: 800; color: var(--gray-900, #111827); }
-        .stalls-header p { color: var(--gray-500, #6b7280); font-size: 0.9rem; margin-top: 0.15rem; }
-        .stalls-search {
-          display: flex; align-items: center; gap: 0.5rem; max-width: 320px; flex: 1;
-          background: var(--gray-50, #f3f4f3); border: 1px solid var(--gray-200, #e5e7eb);
-          border-radius: 999px; padding: 0.55rem 1rem; color: var(--gray-500, #6b7280);
-        }
-        .stalls-search input { border: none; background: none; outline: none; flex: 1; font-size: 0.875rem; }
-
-        .stalls-filter-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-        .stalls-chip {
-          padding: 0.5rem 1rem; border-radius: 999px;
-          border: 1.5px solid var(--gray-200, #e5e7eb); background: #fff;
-          font-size: 0.875rem; font-weight: 500; color: var(--gray-600, #4b5563);
-          cursor: pointer; transition: all 0.15s;
-        }
-        .stalls-chip:hover { border-color: var(--green-600, #1f9d4d); color: var(--green-600, #1f9d4d); }
-        .stalls-chip.active { background: var(--green-600, #1f9d4d); border-color: var(--green-600, #1f9d4d); color: #fff; }
-
-        .stalls-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.25rem; }
-        .stalls-card {
-          display: flex; gap: 1rem; padding: 1.25rem;
-          border: 1px solid var(--gray-200, #e5e7eb); border-radius: 16px;
-          text-decoration: none; color: inherit; background: #fff;
-          transition: box-shadow 0.15s, transform 0.15s;
-        }
-        .stalls-card:hover { box-shadow: 0 10px 24px rgba(0,0,0,0.08); transform: translateY(-2px); }
-        .stalls-card-logo {
-          width: 56px; height: 56px; border-radius: 999px; flex-shrink: 0; overflow: hidden;
-          background: var(--green-600, #1f9d4d); color: #fff; font-weight: 700; font-size: 1.2rem;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .stalls-card-logo img { width: 100%; height: 100%; object-fit: cover; }
-        .stalls-card-body h3 { font-size: 1rem; font-weight: 700; margin-bottom: 0.2rem; }
-        .stalls-card-category {
-          display: inline-block; font-size: 0.7rem; font-weight: 600; color: var(--green-700, #15803d);
-          background: var(--green-50, #eef8ee); padding: 0.15rem 0.5rem; border-radius: 999px; margin-bottom: 0.4rem;
-        }
-        .stalls-card-tagline { font-size: 0.82rem; color: var(--gray-500, #6b7280); margin-bottom: 0.5rem; }
-        .stalls-card-rating { display: flex; align-items: center; gap: 0.3rem; font-size: 0.82rem; font-weight: 600; color: var(--gray-800, #1f2937); }
-        .stalls-card-reviews { font-weight: 400; color: var(--gray-500, #6b7280); }
-
-        @media (max-width: 1024px) { .stalls-grid { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 640px) { .stalls-grid { grid-template-columns: 1fr; } }
-      `}</style>
+      </main>
     </div>
   );
 }

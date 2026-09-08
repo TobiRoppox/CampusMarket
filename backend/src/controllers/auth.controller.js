@@ -18,8 +18,7 @@ const signRefreshToken = (userId) =>
 // ── REGISTER ─────────────────────────────────────────────────
 export const register = async (req, res, next) => {
   try {
-    const { name, email, password, role = "buyer" } = req.body;
-    const user = await authStore.registerUser({ name, email, password, role });
+    const user = await authStore.registerUser(req.body);
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user.id);
@@ -67,6 +66,7 @@ export const refresh = async (req, res, next) => {
     }
 
     const user = await authStore.getUserById(payload.id);
+    if (user.is_banned) return res.status(403).json({ error: "Account suspended." });
     const newAccessToken = signAccessToken(user);
     const newRefreshToken = signRefreshToken(user.id);
 
@@ -110,6 +110,7 @@ export const getAllUsers = async (req, res, next) => {
 
     const result = await authStore.listUsers({
       role: req.query.role,
+      status: req.query.status,
       q: req.query.q,
       page: req.query.page || 1,
       limit: req.query.limit || 20,
@@ -119,4 +120,8 @@ export const getAllUsers = async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+};
+
+export const submitCredentials = async (req, res, next) => {
+  try { res.json(await authStore.submitCredentials(req.user.id, req.body)); } catch (error) { next(error); }
 };

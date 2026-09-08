@@ -10,7 +10,7 @@ export function CartProvider({ children }) {
   const [loading, setLoading] = useState(false);
 
   const fetchCart = useCallback(async () => {
-    if (!user || user.role !== "buyer") return;
+    if (!user || user.role !== "buyer" || user.status !== "approved") { setItems([]); return; }
     try {
       setLoading(true);
       const { data } = await cartService.get();

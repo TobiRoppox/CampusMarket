@@ -1,16 +1,23 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar.jsx";
 import { stallService } from "../../services/api.js";
 import toast from "react-hot-toast";
 import {
-  FiShoppingBag,
+  FiAlertCircle,
+  FiCheckCircle,
+  FiClock,
   FiEdit2,
+  FiExternalLink,
+  FiImage,
   FiMapPin,
   FiPhone,
-  FiClock,
+  FiRefreshCw,
   FiSave,
+  FiShoppingBag,
+  FiX,
 } from "react-icons/fi";
+import "./Mystall.css";
 
 const CATEGORIES = ["food", "merchandise", "mixed-use"];
 const CATEGORY_LABELS = {
@@ -29,416 +36,509 @@ const EMPTY_FORM = {
   operating_hours: "",
 };
 
+const extractStall = (payload) => {
+  const value =
+    payload?.data?.stall ?? payload?.stall ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value[0] || null : value || null;
+};
+
+const toForm = (stall) => ({
+  name: stall?.name || "",
+  description: stall?.description || "",
+  category: CATEGORIES.includes(stall?.category) ? stall.category : "food",
+  logo_url: stall?.logo_url || "",
+  contact_number: stall?.contact_number || "",
+  location: stall?.location || "",
+  operating_hours: stall?.operating_hours || "",
+});
+
+const isValidImageUrl = (value) => {
+  if (!value.trim() || value.startsWith("/images/")) return true;
+  try {
+    return ["http:", "https:"].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+};
+
+const formatDate = (value) => {
+  if (!value) return "Not available";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not available";
+  return date.toLocaleDateString("en-PH", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+};
+
 export default function MyStall() {
   const [stall, setStall] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [logoFailed, setLogoFailed] = useState(false);
 
-  useEffect(() => {
-    stallService
-      .getMy()
-      .then(({ data }) => {
-        setStall(data);
-        if (data) {
-          setForm({
-            name: data.name || "",
-            description: data.description || "",
-            category: data.category || "food",
-            logo_url: data.logo_url || "",
-            contact_number: data.contact_number || "",
-            location: data.location || "",
-            operating_hours: data.operating_hours || "",
-          });
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+  const loadStall = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await stallService.getMy();
+      const currentStall = extractStall(response.data);
+      setStall(currentStall);
+      setForm(toForm(currentStall));
+      setLogoFailed(false);
+    } catch (requestError) {
+      setStall(null);
+      setError(
+        requestError.response?.data?.error ||
+          "We couldn't load your stall profile. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const handleChange = (e) => {
-    setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
+  useEffect(() => {
+    loadStall();
+  }, [loadStall]);
+
+  const completion = useMemo(() => {
+    if (!stall) return 0;
+    const fields = [
+      stall.name,
+      stall.description,
+      stall.category,
+      stall.logo_url,
+      stall.contact_number,
+      stall.location,
+      stall.operating_hours,
+    ];
+    return Math.round((fields.filter(Boolean).length / fields.length) * 100);
+  }, [stall]);
+
+  const status = String(stall?.status || "pending").toLowerCase();
+  const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+
+  const handleChange = ({ target: { name, value } }) => {
+    setForm((previous) => ({ ...previous, [name]: value }));
+    setErrors((previous) => ({ ...previous, [name]: "" }));
+    if (name === "logo_url") setLogoFailed(false);
   };
 
-  const handleSave = async (e) => {
-    e.preventDefault();
+  const validate = () => {
+    const nextErrors = {};
+    if (form.name.trim().length < 2) {
+      nextErrors.name = "Enter at least 2 characters.";
+    }
+    if (form.description.trim().length > 500) {
+      nextErrors.description = "Keep the description under 500 characters.";
+    }
+    if (!CATEGORIES.includes(form.category)) {
+      nextErrors.category = "Choose a valid category.";
+    }
+    if (!isValidImageUrl(form.logo_url)) {
+      nextErrors.logo_url = "Enter a valid http or https image URL.";
+    }
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+    if (!stall?.id || !validate()) return;
+
+    const payload = Object.fromEntries(
+      Object.entries(form).map(([key, value]) => [key, value.trim()]),
+    );
+
+    setSaving(true);
     try {
-      setSaving(true);
-      const { data } = await stallService.update(stall.id, form);
-      setStall(data);
-      toast.success("Stall updated!");
+      const response = await stallService.update(stall.id, payload);
+      const updated = extractStall(response.data) || { ...stall, ...payload };
+      setStall(updated);
+      setForm(toForm(updated));
       setEditing(false);
-    } catch (err) {
-      toast.error(err.response?.data?.error || "Failed to update stall");
+      setLogoFailed(false);
+      toast.success("Stall profile updated");
+    } catch (requestError) {
+      toast.error(
+        requestError.response?.data?.error || "Failed to update your stall",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const fmtDate = (d) =>
-    d
-      ? new Date(d).toLocaleDateString("en-PH", {
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        })
-      : "—";
+  const cancelEditing = () => {
+    if (saving) return;
+    setForm(toForm(stall));
+    setErrors({});
+    setLogoFailed(false);
+    setEditing(false);
+  };
 
-  if (loading) {
-    return (
-      <div className="dashboard-layout">
-        <Sidebar />
-        <main className="dashboard-main">
-          <div className="topbar">
-            <div className="topbar-left">
-              <div className="topbar-titles">
-                <h1>My Stall</h1>
-              </div>
-            </div>
-          </div>
-          <div className="dashboard-content">
-            <div
-              className="skeleton"
-              style={{ height: 320, borderRadius: 12 }}
-            />
-          </div>
-        </main>
-      </div>
+  const renderLogo = (source, name, preview = false) =>
+    source && !logoFailed ? (
+      <img
+        src={source}
+        alt={preview ? "Stall logo preview" : `${name} logo`}
+        onError={() => setLogoFailed(true)}
+      />
+    ) : (
+      <FiShoppingBag aria-hidden="true" />
     );
-  }
-
-  // No stall yet — hasn't applied
-  if (!stall) {
-    return (
-      <div className="dashboard-layout">
-        <Sidebar />
-        <main className="dashboard-main">
-          <div className="topbar">
-            <div className="topbar-left">
-              <div className="topbar-titles">
-                <h1>My Stall</h1>
-                <p>You don't have a stall yet.</p>
-              </div>
-            </div>
-          </div>
-          <div className="dashboard-content">
-            <div className="empty-state">
-              <div className="empty-state-icon">
-                <FiShoppingBag size={32} />
-              </div>
-              <h3>No stall found</h3>
-              <p>
-                Apply for a stall at an upcoming event to get started selling.
-              </p>
-              <Link
-                to="/seller/apply"
-                className="btn btn-primary"
-                style={{ marginTop: "1rem" }}
-              >
-                Apply for a Stall
-              </Link>
-            </div>
-          </div>
-        </main>
-      </div>
-    );
-  }
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout my-stall-shell">
       <Sidebar />
       <main className="dashboard-main">
-        <div className="topbar">
+        <header className="topbar my-stall-topbar">
           <div className="topbar-left">
             <div className="topbar-titles">
               <h1>My Stall</h1>
-              <p>Manage your stall's public profile.</p>
+              <p>Keep your public seller profile clear and up to date.</p>
             </div>
           </div>
           <div className="topbar-right">
-            {!editing && (
+            {stall?.status === "approved" && <button className="btn btn-outline btn-sm" disabled={saving} onClick={async () => {
+              setSaving(true);
+              try { const { data } = await stallService.update(stall.id, { is_active: !stall.is_active }); setStall(data); toast.success(data.is_active ? "Store is open on the marketplace" : "Store is temporarily closed"); }
+              catch (error) { toast.error(error.response?.data?.error || "Could not update store availability"); }
+              finally { setSaving(false); }
+            }}>{stall.is_active ? "Close store for now" : "Open store"}</button>}
+            {stall && !editing && (
               <button
                 className="btn btn-primary btn-sm"
                 onClick={() => setEditing(true)}
               >
-                <FiEdit2 size={14} /> Edit Stall
+                <FiEdit2 /> Edit profile
               </button>
             )}
           </div>
-        </div>
+        </header>
 
-        <div className="dashboard-content">
-          {/* Status banner */}
-          {stall.status !== "approved" && (
-            <div className={`stall-status-banner status-${stall.status}`}>
-              <span className={`badge status-${stall.status}`}>
-                {stall.status}
-              </span>
-              <p>
-                {stall.status === "pending"
-                  ? "Your stall application is awaiting admin approval."
-                  : "Your stall application was not approved. Contact support for details."}
-              </p>
-            </div>
-          )}
-
-          {!editing ? (
-            /* ── View mode ── */
-            <div className="card stall-profile-card">
-              <div className="stall-profile-header">
-                <div className="stall-logo">
-                  {form.logo_url ? (
-                    <img src={form.logo_url} alt={form.name} />
-                  ) : (
-                    <FiShoppingBag size={28} />
-                  )}
-                </div>
-                <div>
-                  <h2>{stall.name}</h2>
-                  <span
-                    className="badge badge-green"
-                    style={{ textTransform: "capitalize" }}
-                  >
-                    {CATEGORY_LABELS[stall.category] || stall.category}
-                  </span>
-                </div>
+        <div className="dashboard-content my-stall-content">
+          {loading ? (
+            <div
+              className="my-stall-loading"
+              aria-label="Loading stall profile"
+            >
+              <i />
+              <div>
+                <i />
+                <i />
+                <i />
               </div>
-
-              {stall.description && (
-                <p className="stall-desc">{stall.description}</p>
+            </div>
+          ) : error ? (
+            <section className="my-stall-state error" role="alert">
+              <span>
+                <FiAlertCircle />
+              </span>
+              <small>Unable to load</small>
+              <h2>Your stall profile is temporarily unavailable</h2>
+              <p>{error}</p>
+              <button className="btn btn-primary" onClick={loadStall}>
+                <FiRefreshCw /> Try again
+              </button>
+            </section>
+          ) : !stall ? (
+            <section className="my-stall-state">
+              <span>
+                <FiShoppingBag />
+              </span>
+              <small>Start selling</small>
+              <h2>Create your campus storefront</h2>
+              <p>
+                Apply for a stall first. Once approved, you can publish products
+                and receive orders.
+              </p>
+              <Link to="/open-store" className="btn btn-primary">
+                Apply for a stall
+              </Link>
+            </section>
+          ) : (
+            <>
+              {!["approved", "active"].includes(status) && (
+                <div
+                  className={`my-stall-status status-${status}`}
+                  role="status"
+                >
+                  <FiAlertCircle />
+                  <div>
+                    <strong>Application {statusLabel}</strong>
+                    <p>
+                      {status === "pending"
+                        ? "An administrator is reviewing your stall. You can still complete your profile."
+                        : "Your stall is not currently public. Contact support if you need more details."}
+                    </p>
+                  </div>
+                  <span>{statusLabel}</span>
+                </div>
               )}
 
-              <div className="stall-info-grid">
-                <div className="stall-info-item">
-                  <FiMapPin size={16} />
-                  <div>
-                    <span className="stall-info-label">Location</span>
-                    <span className="stall-info-value">
-                      {stall.location || "Not set"}
-                    </span>
-                  </div>
-                </div>
-                <div className="stall-info-item">
-                  <FiPhone size={16} />
-                  <div>
-                    <span className="stall-info-label">Contact</span>
-                    <span className="stall-info-value">
-                      {stall.contact_number || "Not set"}
-                    </span>
-                  </div>
-                </div>
-                <div className="stall-info-item">
-                  <FiClock size={16} />
-                  <div>
-                    <span className="stall-info-label">Operating Hours</span>
-                    <span className="stall-info-value">
-                      {stall.operating_hours || "Not set"}
-                    </span>
-                  </div>
-                </div>
-              </div>
+              {!editing ? (
+                <div className="my-stall-grid">
+                  <section className="my-stall-profile">
+                    <div className="my-stall-cover" aria-hidden="true" />
+                    <div className="my-stall-profile-body">
+                      <div className="my-stall-identity">
+                        <div className="my-stall-logo">
+                          {renderLogo(stall.logo_url, stall.name)}
+                        </div>
+                        <div>
+                          <span>
+                            {CATEGORY_LABELS[stall.category] ||
+                              stall.category ||
+                              "Campus seller"}
+                          </span>
+                          <h2>{stall.name || "Untitled stall"}</h2>
+                          <p>
+                            {stall.description ||
+                              "Add a short description so buyers know what you sell."}
+                          </p>
+                        </div>
+                      </div>
 
-              <p className="stall-since">
-                Stall created on {fmtDate(stall.created_at)}
-              </p>
-            </div>
-          ) : (
-            /* ── Edit mode ── */
-            <form className="card stall-form-card" onSubmit={handleSave}>
-              <div className="form-group">
-                <label className="form-label">Stall name *</label>
-                <input
-                  className="form-input"
-                  name="name"
-                  value={form.name}
-                  onChange={handleChange}
-                  required
-                />
-              </div>
+                      <div className="my-stall-info-grid">
+                        <article>
+                          <FiMapPin />
+                          <div>
+                            <small>Location</small>
+                            <strong>{stall.location || "Not set"}</strong>
+                          </div>
+                        </article>
+                        <article>
+                          <FiPhone />
+                          <div>
+                            <small>Contact number</small>
+                            <strong>{stall.contact_number || "Not set"}</strong>
+                          </div>
+                        </article>
+                        <article>
+                          <FiClock />
+                          <div>
+                            <small>Operating hours</small>
+                            <strong>
+                              {stall.operating_hours || "Not set"}
+                            </strong>
+                          </div>
+                        </article>
+                      </div>
 
-              <div className="form-group">
-                <label className="form-label">Description</label>
-                <textarea
-                  className="form-input"
-                  name="description"
-                  rows={3}
-                  value={form.description}
-                  onChange={handleChange}
-                  style={{ resize: "vertical" }}
-                />
-              </div>
+                      <footer>
+                        <span>Created {formatDate(stall.created_at)}</span>
+                        {["approved", "active"].includes(status) && (
+                          <Link to={`/stalls/${stall.id}`}>
+                            View public profile <FiExternalLink />
+                          </Link>
+                        )}
+                      </footer>
+                    </div>
+                  </section>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "1rem",
-                }}
-              >
-                <div className="form-group">
-                  <label className="form-label">Category</label>
-                  <select
-                    className="form-input form-select"
-                    name="category"
-                    value={form.category}
-                    onChange={handleChange}
-                  >
-                    {CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {CATEGORY_LABELS[c]}
-                      </option>
-                    ))}
-                  </select>
+                  <aside className="my-stall-sidebar-card">
+                    <span>Profile health</span>
+                    <div className="my-stall-completion">
+                      <strong>{completion}%</strong>
+                      <div>
+                        <i style={{ width: `${completion}%` }} />
+                      </div>
+                    </div>
+                    <p>
+                      {completion === 100
+                        ? "Your storefront contains all the essential information."
+                        : "Complete the missing details to help buyers trust and find your stall."}
+                    </p>
+                    <ul>
+                      <li className={stall.logo_url ? "done" : ""}>
+                        <FiCheckCircle /> Stall logo
+                      </li>
+                      <li className={stall.description ? "done" : ""}>
+                        <FiCheckCircle /> Description
+                      </li>
+                      <li className={stall.location ? "done" : ""}>
+                        <FiCheckCircle /> Location
+                      </li>
+                      <li className={stall.contact_number ? "done" : ""}>
+                        <FiCheckCircle /> Contact number
+                      </li>
+                      <li className={stall.operating_hours ? "done" : ""}>
+                        <FiCheckCircle /> Operating hours
+                      </li>
+                    </ul>
+                    {completion < 100 && (
+                      <button
+                        className="btn btn-outline"
+                        onClick={() => setEditing(true)}
+                      >
+                        Complete profile
+                      </button>
+                    )}
+                  </aside>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Contact Number</label>
-                  <input
-                    className="form-input"
-                    name="contact_number"
-                    value={form.contact_number}
-                    onChange={handleChange}
-                    placeholder="09XX XXX XXXX"
-                  />
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: "1rem",
-                }}
-              >
-                <div className="form-group">
-                  <label className="form-label">Location</label>
-                  <input
-                    className="form-input"
-                    name="location"
-                    value={form.location}
-                    onChange={handleChange}
-                    placeholder="e.g. Stall #12, CSUCC Grounds"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Operating Hours</label>
-                  <input
-                    className="form-input"
-                    name="operating_hours"
-                    value={form.operating_hours}
-                    onChange={handleChange}
-                    placeholder="e.g. 8AM – 5PM"
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Logo URL</label>
-                <input
-                  className="form-input"
-                  name="logo_url"
-                  value={form.logo_url}
-                  onChange={handleChange}
-                  placeholder="https://..."
-                />
-                {form.logo_url && (
-                  <img
-                    src={form.logo_url}
-                    alt="Preview"
-                    style={{
-                      marginTop: 8,
-                      width: 64,
-                      height: 64,
-                      objectFit: "cover",
-                      borderRadius: "50%",
-                      border: "1px solid var(--gray-200)",
-                    }}
-                    onError={(e) => {
-                      e.target.style.display = "none";
-                    }}
-                  />
-                )}
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  gap: "0.75rem",
-                  paddingTop: "0.5rem",
-                }}
-              >
-                <button
-                  className="btn btn-primary"
-                  type="submit"
-                  disabled={saving}
-                  style={{ flex: 1 }}
+              ) : (
+                <form
+                  className="my-stall-form"
+                  onSubmit={handleSave}
+                  noValidate
                 >
-                  {saving ? (
-                    <span className="spinner" />
-                  ) : (
-                    <>
-                      <FiSave size={15} /> Save Changes
-                    </>
-                  )}
-                </button>
-                <button
-                  className="btn btn-ghost"
-                  type="button"
-                  onClick={() => {
-                    setEditing(false);
-                    setForm({
-                      name: stall.name || "",
-                      description: stall.description || "",
-                      category: stall.category || "food",
-                      logo_url: stall.logo_url || "",
-                      contact_number: stall.contact_number || "",
-                      location: stall.location || "",
-                      operating_hours: stall.operating_hours || "",
-                    });
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
+                  <div className="my-stall-form-heading">
+                    <div>
+                      <small>Public information</small>
+                      <h2>Edit stall profile</h2>
+                      <p>
+                        These details are visible to buyers on your storefront.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={cancelEditing}
+                      aria-label="Close editor"
+                    >
+                      <FiX />
+                    </button>
+                  </div>
+
+                  <div className="my-stall-form-layout">
+                    <div className="my-stall-fields">
+                      <div className="my-stall-field wide">
+                        <label htmlFor="stall-name">
+                          Stall name <span>*</span>
+                        </label>
+                        <input
+                          id="stall-name"
+                          name="name"
+                          value={form.name}
+                          onChange={handleChange}
+                          className={errors.name ? "invalid" : ""}
+                        />
+                        {errors.name && <small>{errors.name}</small>}
+                      </div>
+                      <div className="my-stall-field wide">
+                        <label htmlFor="stall-description">Description</label>
+                        <textarea
+                          id="stall-description"
+                          name="description"
+                          rows="4"
+                          maxLength="500"
+                          value={form.description}
+                          onChange={handleChange}
+                          className={errors.description ? "invalid" : ""}
+                        />
+                        <em>{form.description.length}/500</em>
+                        {errors.description && (
+                          <small>{errors.description}</small>
+                        )}
+                      </div>
+                      <div className="my-stall-field">
+                        <label htmlFor="stall-category">Category</label>
+                        <select
+                          id="stall-category"
+                          name="category"
+                          value={form.category}
+                          onChange={handleChange}
+                        >
+                          {CATEGORIES.map((category) => (
+                            <option key={category} value={category}>
+                              {CATEGORY_LABELS[category]}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="my-stall-field">
+                        <label htmlFor="stall-phone">Contact number</label>
+                        <input
+                          id="stall-phone"
+                          name="contact_number"
+                          inputMode="tel"
+                          value={form.contact_number}
+                          onChange={handleChange}
+                          placeholder="09XX XXX XXXX"
+                        />
+                      </div>
+                      <div className="my-stall-field">
+                        <label htmlFor="stall-location">Location</label>
+                        <input
+                          id="stall-location"
+                          name="location"
+                          value={form.location}
+                          onChange={handleChange}
+                          placeholder="Stall #12, CSUCC Grounds"
+                        />
+                      </div>
+                      <div className="my-stall-field">
+                        <label htmlFor="stall-hours">Operating hours</label>
+                        <input
+                          id="stall-hours"
+                          name="operating_hours"
+                          value={form.operating_hours}
+                          onChange={handleChange}
+                          placeholder="8:00 AM – 5:00 PM"
+                        />
+                      </div>
+                      <div className="my-stall-field wide">
+                        <label htmlFor="stall-logo">Logo URL</label>
+                        <div className="my-stall-logo-input">
+                          <FiImage />
+                          <input
+                            id="stall-logo"
+                            name="logo_url"
+                            value={form.logo_url}
+                            onChange={handleChange}
+                            placeholder="https://example.com/logo.jpg"
+                          />
+                        </div>
+                        {errors.logo_url && <small>{errors.logo_url}</small>}
+                      </div>
+                    </div>
+
+                    <aside className="my-stall-preview">
+                      <small>Live preview</small>
+                      <div className="my-stall-preview-logo">
+                        {renderLogo(form.logo_url, form.name, true)}
+                      </div>
+                      <h3>{form.name.trim() || "Your stall name"}</h3>
+                      <span>{CATEGORY_LABELS[form.category]}</span>
+                      <p>
+                        {form.description.trim() ||
+                          "Your description will appear here."}
+                      </p>
+                    </aside>
+                  </div>
+
+                  <div className="my-stall-form-actions">
+                    <button
+                      className="btn btn-ghost"
+                      type="button"
+                      onClick={cancelEditing}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="btn btn-primary"
+                      type="submit"
+                      disabled={saving}
+                    >
+                      {saving ? (
+                        <span className="my-stall-spinner" />
+                      ) : (
+                        <FiSave />
+                      )}
+                      {saving ? "Saving…" : "Save changes"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </>
           )}
         </div>
       </main>
-
-      <style>{`
-        .stall-status-banner {
-          display: flex; align-items: center; gap: 0.75rem;
-          padding: 0.9rem 1.25rem; border-radius: var(--radius-lg);
-          background: var(--gray-50); border: 1px solid var(--gray-200);
-          margin-bottom: 1.5rem;
-        }
-        .stall-status-banner p { font-size: 0.875rem; color: var(--gray-600); margin: 0; }
-
-        .stall-profile-card { padding: 1.5rem; }
-        .stall-profile-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
-        .stall-logo {
-          width: 64px; height: 64px; border-radius: 50%; overflow: hidden; flex-shrink: 0;
-          background: var(--color-secondary); color: #fff;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .stall-logo img { width: 100%; height: 100%; object-fit: cover; }
-        .stall-profile-header h2 { font-size: 1.25rem; font-weight: 800; color: var(--gray-900); margin-bottom: 0.3rem; }
-        .stall-desc { color: var(--gray-600); font-size: 0.9rem; line-height: 1.6; margin-bottom: 1.25rem; }
-
-        .stall-info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.25rem; }
-        .stall-info-item { display: flex; align-items: flex-start; gap: 0.6rem; color: var(--gray-500); }
-        .stall-info-item > div { display: flex; flex-direction: column; }
-        .stall-info-label { font-size: 0.75rem; color: var(--gray-500); }
-        .stall-info-value { font-size: 0.875rem; font-weight: 600; color: var(--gray-800); }
-
-        .stall-since { font-size: 0.8rem; color: var(--gray-400); border-top: 1px solid var(--gray-100); padding-top: 1rem; }
-
-        .stall-form-card { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.1rem; }
-
-        @media (max-width: 768px) {
-          .stall-info-grid { grid-template-columns: 1fr; }
-        }
-      `}</style>
     </div>
   );
 }

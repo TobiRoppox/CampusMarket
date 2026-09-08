@@ -1,0 +1,533 @@
+.buyer-home {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(22, 163, 74, 0.07), transparent 24rem),
+    linear-gradient(180deg, #fbfefc 0%, #f5f8f6 100%);
+}
+
+.buyer-home-content {
+  width: min(100%, 1480px);
+  margin: 0 auto;
+  padding: 1.25rem clamp(1rem, 2.4vw, 2rem) 5rem;
+}
+
+.buyer-home-footer {
+  border-top: 1px solid #d5e6db;
+  background: #edf6f0;
+  color: #526759;
+}
+
+.buyer-footer-inner {
+  width: min(100%, 1480px);
+  margin: 0 auto;
+  padding: 2.5rem clamp(1rem, 2.4vw, 2rem) 1.25rem;
+}
+
+.buyer-footer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, .7fr) minmax(0, 1fr);
+  gap: 2.5rem;
+  padding-bottom: 2rem;
+}
+
+.buyer-footer-brand > a { display: inline-block; max-width: 100%; }
+.buyer-footer-brand img { display: block; width: 240px; max-width: 100%; height: auto; }
+.buyer-footer-brand p { max-width: 360px; margin: .5rem 0 .75rem; }
+.buyer-footer-brand strong { color: #08783d; font-size: .875rem; }
+.buyer-footer-grid p { font-size: .875rem; line-height: 1.7; }
+.buyer-footer-grid h2 { margin: 0 0 1rem; color: #153e28; font-size: .9375rem; font-weight: 750; }
+.buyer-footer-links { display: flex; flex-direction: column; align-items: flex-start; gap: .7rem; }
+.buyer-footer-links h2 { margin-bottom: .3rem; }
+.buyer-footer-links a { color: #526759; font-size: .875rem; text-decoration: none; }
+.buyer-footer-links a:hover { color: #08783d; text-decoration: underline; text-underline-offset: 4px; }
+.buyer-home-footer a:focus-visible { outline: 2px solid #08783d; outline-offset: 4px; border-radius: 3px; }
+.buyer-footer-location { display: flex; align-items: flex-start; gap: .5rem; margin-bottom: .75rem; }
+.buyer-footer-location svg { flex: 0 0 auto; margin-top: .3rem; color: #08783d; }
+.buyer-footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: .75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid #d5e6db;
+}
+.buyer-footer-bottom small,
+.buyer-footer-bottom span { font-size: .75rem; }
+
+@media (max-width: 720px) {
+  .buyer-footer-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }
+  .buyer-footer-brand { grid-column: 1 / -1; }
+}
+
+@media (max-width: 480px) {
+  .buyer-footer-grid { grid-template-columns: minmax(0, 1fr); }
+  .buyer-footer-bottom { flex-direction: column; }
+}
+
+.buyer-home .buyer-hero {
+  isolation: isolate;
+  position: relative;
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  margin: 0 0 2rem;
+  padding: clamp(2rem, 4.4vw, 4.25rem);
+  color: #0f2f1c;
+  background-color: #eaf8ef;
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(235, 250, 241, 0.99) 0%,
+      rgba(235, 250, 241, 0.96) 34%,
+      rgba(235, 250, 241, 0.58) 52%,
+      rgba(235, 250, 241, 0) 72%
+    ),
+    url("/images/buyer/campusmarket-background.png");
+  background-position: center;
+  background-size: cover;
+  border: 1px solid rgba(21, 128, 61, 0.12);
+  border-radius: 26px;
+  box-shadow: 0 22px 55px rgba(15, 72, 38, 0.1);
+}
+
+.buyer-home .buyer-hero::before {
+  content: none;
+}
+
+.buyer-home .buyer-hero-text {
+  position: relative;
+  z-index: 2;
+  width: min(100%, 680px);
+  max-width: 680px;
+}
+
+.buyer-home .buyer-hero-kicker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.48rem;
+  width: fit-content;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  color: #0b7a3d;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.buyer-home .buyer-hero-kicker i {
+  width: 4px;
+  height: 4px;
+  background: #f5b800;
+  border-radius: 50%;
+}
+
+.buyer-home .buyer-hero h1 {
+  max-width: 670px;
+  margin: 0 0 0.55rem;
+  color: #0b4226;
+  font-size: clamp(2.25rem, 4.3vw, 4rem);
+  font-weight: 850;
+  line-height: 1.03;
+  letter-spacing: -0.055em;
+  text-wrap: balance;
+}
+
+.buyer-home .buyer-hero-text > p {
+  max-width: 610px;
+  margin: 0 0 1.3rem;
+  color: #47725a;
+  font-size: clamp(0.92rem, 1.3vw, 1.04rem);
+  line-height: 1.55;
+}
+
+.buyer-home .buyer-hero-search {
+  width: min(100%, 575px);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.34rem;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 123, 62, 0.16);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(15, 62, 38, 0.12);
+}
+
+.buyer-home .buyer-hero-search input {
+  min-width: 0;
+  flex: 1;
+  padding: 0.76rem 0.2rem;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 0.86rem;
+}
+
+.buyer-home .buyer-hero-search .btn {
+  min-width: 112px;
+  min-height: 44px;
+  border-radius: 10px !important;
+}
+
+.buyer-home .buyer-hero-search:focus-within {
+  border-color: #168447;
+  box-shadow: 0 0 0 4px rgba(22, 132, 71, 0.1), 0 12px 32px rgba(15, 62, 38, 0.13);
+}
+
+.buyer-home .buyer-hero-trust {
+  margin-top: 0.85rem;
+  color: #557563;
+  font-size: 0.74rem;
+}
+
+.buyer-home .buyer-section,
+.buyer-home .buyer-products-section {
+  margin-bottom: 2.35rem;
+}
+
+.buyer-home .buyer-section-header {
+  align-items: end;
+  margin-bottom: 0.9rem;
+}
+
+.buyer-home .buyer-section-kicker {
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+}
+
+.buyer-home .buyer-section-header h2 {
+  font-size: clamp(1.18rem, 2vw, 1.5rem);
+}
+
+.buyer-home .buyer-stall-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.buyer-home .buyer-stall-card {
+  grid-template-columns: 66px minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  min-height: 96px;
+  padding: 0.8rem;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 15px;
+}
+
+.buyer-home .buyer-stall-logo {
+  width: 66px;
+  height: 66px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 5px 14px rgba(15, 62, 38, 0.13);
+}
+
+.buyer-home .buyer-stall-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.buyer-home .buyer-stall-name h3 {
+  font-size: 0.87rem;
+}
+
+.buyer-home .buyer-stall-rating {
+  margin-top: 0.28rem !important;
+}
+
+.buyer-home .buyer-event-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.buyer-home .buyer-event-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(130px, 42%) minmax(0, 58%);
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e1e9e4;
+  border-radius: 16px;
+  box-shadow: 0 5px 18px rgba(15, 62, 38, 0.05);
+}
+
+.buyer-home .buyer-event-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(15, 123, 62, 0.28);
+  box-shadow: 0 14px 30px rgba(15, 62, 38, 0.1);
+}
+
+.buyer-home .buyer-event-thumb {
+  position: relative;
+  min-height: 174px;
+  height: 100%;
+  overflow: hidden;
+  background: #dceee3;
+}
+
+.buyer-home .buyer-event-thumb::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  background: linear-gradient(180deg, transparent 45%, rgba(2, 37, 18, 0.42));
+  border: 0;
+  border-radius: 0;
+}
+
+.buyer-home .buyer-event-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.35s ease;
+}
+
+.buyer-home .buyer-event-card:hover .buyer-event-thumb img {
+  transform: scale(1.045);
+}
+
+.buyer-home .buyer-event-date {
+  position: absolute;
+  z-index: 2;
+  left: 0.7rem;
+  bottom: 0.7rem;
+  width: 49px;
+  height: 53px;
+  display: grid;
+  place-content: center;
+  gap: 0;
+  background: rgba(8, 92, 47, 0.93);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 10px;
+  box-shadow: 0 8px 20px rgba(3, 40, 20, 0.26);
+  backdrop-filter: blur(8px);
+}
+
+.buyer-home .buyer-event-date span,
+.buyer-home .buyer-event-date strong {
+  color: #fff;
+}
+
+.buyer-home .buyer-event-date span {
+  font-size: 0.55rem;
+}
+
+.buyer-home .buyer-event-date strong {
+  font-size: 1.1rem;
+}
+
+.buyer-home .buyer-event-body {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.9rem;
+}
+
+.buyer-home .buyer-event-meta {
+  font-size: 0.65rem;
+}
+
+.buyer-home .buyer-event-body h3 {
+  font-size: 0.88rem;
+}
+
+.buyer-home .buyer-event-tags {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  margin-top: 0.55rem;
+  padding: 0.25rem 0.48rem;
+  color: #137a42;
+  background: #ebf8ef;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.buyer-home .buyer-products-section {
+  padding: clamp(1.1rem, 2.4vw, 1.65rem);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: 22px;
+}
+
+.buyer-home .category-bar {
+  padding: 0.95rem 0 1.25rem;
+}
+
+.buyer-home .cat-chip {
+  border-radius: 999px;
+}
+
+.buyer-home .product-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+.buyer-home .buyer-rec-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.9rem;
+}
+
+@media (max-width: 1240px) {
+  .buyer-home .buyer-stall-grid,
+  .buyer-home .buyer-rec-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .buyer-home .product-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .buyer-home .buyer-hero {
+    min-height: 340px;
+    background-image:
+      linear-gradient(
+        90deg,
+        rgba(235, 250, 241, 0.99) 0%,
+        rgba(235, 250, 241, 0.94) 50%,
+        rgba(235, 250, 241, 0.35) 100%
+      ),
+      url("/images/buyer/campusmarket-background.png");
+    background-position: 58% center;
+  }
+
+  .buyer-home .buyer-event-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .buyer-home .buyer-event-card {
+    grid-template-columns: minmax(190px, 36%) minmax(0, 64%);
+  }
+
+  .buyer-home .product-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .buyer-home-content {
+    padding-top: 0.8rem;
+  }
+
+  .buyer-home .buyer-hero {
+    min-height: 420px;
+    align-items: flex-end;
+    padding: 1.4rem;
+    background-image:
+      linear-gradient(
+        180deg,
+        rgba(235, 250, 241, 0.1) 0%,
+        rgba(235, 250, 241, 0.84) 46%,
+        rgba(235, 250, 241, 0.99) 72%
+      ),
+      url("/images/buyer/campusmarket-background.png");
+    background-position: 72% center;
+    border-radius: 20px;
+  }
+
+  .buyer-home .buyer-hero h1 {
+    font-size: clamp(2rem, 10vw, 2.8rem);
+  }
+
+  .buyer-home .buyer-hero-trust {
+    display: none;
+  }
+
+  .buyer-home .buyer-hero-search {
+    display: grid;
+    grid-template-columns: auto 1fr;
+  }
+
+  .buyer-home .buyer-hero-search .btn {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .buyer-home .buyer-stall-grid,
+  .buyer-home .buyer-rec-grid,
+  .buyer-home .product-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .buyer-home .buyer-stall-card {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .buyer-home .buyer-stall-logo {
+    width: 54px;
+    height: 54px;
+  }
+
+  .buyer-home .buyer-card-arrow {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .buyer-home .buyer-stall-grid,
+  .buyer-home .buyer-rec-grid,
+  .buyer-home .product-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .buyer-home .buyer-event-card {
+    grid-template-columns: 1fr;
+  }
+
+  .buyer-home .buyer-event-thumb {
+    min-height: 190px;
+  }
+
+  .buyer-home .buyer-section-header {
+    align-items: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .buyer-home .buyer-event-thumb img,
+  .buyer-home .buyer-event-card,
+  .buyer-home .buyer-stall-card {
+    transition: none;
+  }
+}
+/* Final hero background override */
+.buyer-home .buyer-hero {
+  background-color: #eaf8ef !important;
+
+  background-image:
+    linear-gradient(
+      90deg,
+      rgba(235, 250, 241, 0.99) 0%,
+      rgba(235, 250, 241, 0.94) 34%,
+      rgba(235, 250, 241, 0.5) 52%,
+      rgba(235, 250, 241, 0) 72%
+    ),
+    url("/images/buyer/campusmarket-background.png") !important;
+
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: cover !important;
+}
+
+/* Remove the grid from the old global.css */
+.buyer-home .buyer-hero::before {
+  content: none !important;
+  display: none !important;
+}

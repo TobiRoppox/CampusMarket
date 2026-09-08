@@ -14,7 +14,7 @@ export function AuthProvider({ children }) {
       authService
         .me()
         .then(({ data }) => setUser(data))
-        .catch(() => localStorage.clear())
+        .catch(() => { localStorage.removeItem("accessToken"); localStorage.removeItem("refreshToken"); })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -38,7 +38,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.clear();
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
     setUser(null);
   }, []);
 

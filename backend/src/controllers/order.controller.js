@@ -3,8 +3,8 @@ import { orderStore } from "../data/marketStore.js";
 // ── POST /api/orders ──────────────────────────────────────────────────────────
 export const createOrder = async (req, res, next) => {
   try {
-    const { items, delivery_notes } = req.body;
-    const order = await orderStore.create(req.user.id, items, delivery_notes);
+    const { items, delivery_notes, notes, fulfillment } = req.body;
+    const order = await orderStore.create(req.user.id, items, delivery_notes ?? notes, fulfillment);
     res.status(201).json({ order });
   } catch (err) {
     next(err);

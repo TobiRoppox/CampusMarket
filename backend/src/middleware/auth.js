@@ -1,9 +1,10 @@
 import jwt from "jsonwebtoken";
+import { authStore } from "../data/marketStore.js";
 
 /**
  * Verify JWT access token and attach user payload to req.user
  */
-export const verifyToken = (req, res, next) => {
+export const verifySession = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     return res.status(401).json({ error: "Authentication required" });
@@ -12,7 +13,10 @@ export const verifyToken = (req, res, next) => {
   const token = authHeader.split(" ")[1];
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
+    if (decoded.type === "refresh") return res.status(401).json({ error: "An access token is required." });
+    const user = await authStore.getUserById(decoded.id);
+    if (user.is_banned) return res.status(403).json({ error: "Account suspended." });
+    req.user = user;
     next();
   } catch (err) {
     if (err.name === "TokenExpiredError") {
@@ -21,6 +25,11 @@ export const verifyToken = (req, res, next) => {
     return res.status(401).json({ error: "Invalid token" });
   }
 };
+
+export const verifyToken = (req, res, next) => verifySession(req, res, () => {
+  if (req.user.status !== "approved") return res.status(403).json({ error: "Your CSUCC registration must be approved before using this feature.", code: "APPROVAL_REQUIRED" });
+  next();
+});
 
 /**
  * Role-based access control middleware
@@ -42,11 +51,15 @@ export const requireRole = (...roles) =>
 /**
  * Optional auth — attaches user if token present, continues if not
  */
-export const optionalAuth = (req, _res, next) => {
+export const optionalAuth = async (req, _res, next) => {
   const authHeader = req.headers.authorization;
   if (authHeader?.startsWith("Bearer ")) {
     try {
-      req.user = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+      const decoded = jwt.verify(authHeader.split(" ")[1], process.env.JWT_SECRET);
+      if (decoded.type !== "refresh") {
+        const user = await authStore.getUserById(decoded.id);
+        if (!user.is_banned && user.status === "approved") req.user = user;
+      }
     } catch {
       // ignore invalid token for optional auth
     }

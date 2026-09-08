@@ -1,14 +1,7 @@
 /* ─────────────────────────────────────────────────────────────
    variables.css
-   NOTE: This file no longer redefines tokens that already live in
-   your main design-system stylesheet (--radius-*, --transition,
-   --font-sans, .btn-primary, .product-card, .sidebar-item, etc).
-   Having the same names in two files meant whichever one loaded
-   last silently won — that's why colors/spacing felt inconsistent.
-
-   Your --cm-primary (green) / --cm-accent (gold) tokens are now
-   the single source of truth. This file only adds things that
-   don't exist yet.
+   Tokens remain in global.css as the single source of truth.
+   This file only contains component-specific additions.
 ───────────────────────────────────────────────────────────── */
 
 /* Auth illustration sizing — used by AuthLayout.jsx */
@@ -19,5 +12,7 @@
 }
 
 @media (max-width: 900px) {
-  .auth-illustration-svg { max-width: 280px; }
+  .auth-illustration-svg {
+    max-width: 280px;
+  }
 }

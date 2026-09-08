@@ -1,8 +1,20 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar.jsx";
+import eventService from "../../services/eventService.js";
 import toast from "react-hot-toast";
-import { FiSend } from "react-icons/fi";
+import {
+  FiAlertCircle,
+  FiCalendar,
+  FiCheckCircle,
+  FiClock,
+  FiInfo,
+  FiMapPin,
+  FiRefreshCw,
+  FiSend,
+  FiShoppingBag,
+} from "react-icons/fi";
+import "./SellerApplicationForm.css";
 
 const STALL_CATEGORIES = ["food", "merchandise", "mixed-use"];
 const CATEGORY_LABELS = {
@@ -22,216 +34,511 @@ const EMPTY_FORM = {
   contactInfo: "",
 };
 
-const SellerApplicationForm = () => {
+const extractEvents = (payload) => {
+  const value =
+    payload?.data?.events ?? payload?.events ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value : [];
+};
+
+const normalizeEvent = (event) => ({
+  ...event,
+  id: event.id || event.event_id,
+  name: event.name || event.title || "Untitled event",
+  location: event.location || event.venue || "Location to be announced",
+  date: event.date || event.start_date || event.starts_at || null,
+  endDate: event.end_date || event.ends_at || null,
+});
+
+const formatEventDate = (start, end) => {
+  if (!start) return "Schedule to be announced";
+  const startDate = new Date(start);
+  if (Number.isNaN(startDate.getTime())) return "Schedule to be announced";
+
+  const formatter = new Intl.DateTimeFormat("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  if (!end) return formatter.format(startDate);
+
+  const endDate = new Date(end);
+  return Number.isNaN(endDate.getTime())
+    ? formatter.format(startDate)
+    : `${formatter.format(startDate)} – ${formatter.format(endDate)}`;
+};
+
+export default function SellerApplicationForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [events, setEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState("");
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    // TODO: consider moving into an eventService.js like your other services
-    fetch("/api/events")
-      .then((response) => response.json())
-      .then((data) => setEvents(data || []))
-      .catch((error) => console.error("Error fetching events:", error));
+  const loadEvents = useCallback(async () => {
+    setEventsLoading(true);
+    setEventsError("");
+
+    try {
+      const response = await eventService.getAll({ status: "upcoming" });
+      setEvents(
+        extractEvents(response.data)
+          .map(normalizeEvent)
+          .filter((event) => event.id),
+      );
+    } catch (requestError) {
+      setEvents([]);
+      setEventsError(
+        requestError.response?.data?.error ||
+          "We couldn't load the available events. Please try again.",
+      );
+    } finally {
+      setEventsLoading(false);
+    }
   }, []);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  useEffect(() => {
+    loadEvents();
+  }, [loadEvents]);
+
+  useEffect(() => {
+    const requestedEventId = searchParams.get("eventId");
+    if (
+      requestedEventId &&
+      events.some((event) => String(event.id) === requestedEventId)
+    ) {
+      setFormData((previous) => ({
+        ...previous,
+        eventId: previous.eventId || requestedEventId,
+      }));
+    }
+  }, [events, searchParams]);
+
+  const selectedEvent = useMemo(
+    () => events.find((event) => String(event.id) === String(formData.eventId)),
+    [events, formData.eventId],
+  );
+
+  const completedFields = useMemo(() => {
+    const required = [
+      formData.eventId,
+      formData.stallName,
+      formData.businessName,
+      formData.productCategory,
+      formData.productList,
+      formData.preferredStallSize,
+      formData.duration,
+      formData.contactInfo,
+    ];
+    return required.filter((value) => String(value).trim()).length;
+  }, [formData]);
+
+  const progress = Math.round((completedFields / 8) * 100);
+
+  const handleChange = ({ target: { name, value } }) => {
+    setFormData((previous) => ({ ...previous, [name]: value }));
+    setErrors((previous) => ({ ...previous, [name]: "" }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const validate = () => {
+    const nextErrors = {};
+    const size = Number(formData.preferredStallSize);
+    const duration = Number(formData.duration);
+
+    if (!formData.eventId) nextErrors.eventId = "Select an event.";
+    if (formData.stallName.trim().length < 2) {
+      nextErrors.stallName = "Enter at least 2 characters.";
+    }
+    if (formData.businessName.trim().length < 2) {
+      nextErrors.businessName = "Enter your business or organization name.";
+    }
+    if (!STALL_CATEGORIES.includes(formData.productCategory)) {
+      nextErrors.productCategory = "Choose a valid category.";
+    }
+    if (formData.productList.trim().length < 3) {
+      nextErrors.productList = "List at least one product.";
+    }
+    if (!Number.isFinite(size) || size <= 0) {
+      nextErrors.preferredStallSize = "Enter a stall size greater than zero.";
+    }
+    if (!Number.isInteger(duration) || duration <= 0) {
+      nextErrors.duration = "Enter a whole number of days.";
+    }
+    if (formData.contactInfo.trim().length < 5) {
+      nextErrors.contactInfo = "Enter a valid phone number or email.";
+    }
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!validate()) {
+      toast.error("Please review the highlighted fields");
+      return;
+    }
+
+    const payload = {
+      ...formData,
+      eventId: formData.eventId,
+      stallName: formData.stallName.trim(),
+      businessName: formData.businessName.trim(),
+      productList: formData.productList.trim(),
+      preferredStallSize: Number(formData.preferredStallSize),
+      duration: Number(formData.duration),
+      contactInfo: formData.contactInfo.trim(),
+    };
+
+    setSubmitting(true);
     try {
-      setSubmitting(true);
-      const response = await fetch("/api/seller-applications", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-      if (!response.ok) throw new Error("Failed to submit");
-      await response.json();
-      toast.success("Application submitted successfully!");
+      await eventService.submitSellerApplication(payload);
+      toast.success("Application submitted successfully");
       navigate("/seller/stall");
-    } catch (error) {
-      console.error("Error submitting application:", error);
-      toast.error("Failed to submit application");
+    } catch (requestError) {
+      toast.error(
+        requestError.response?.data?.error ||
+          requestError.response?.data?.message ||
+          "Failed to submit your application",
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout seller-application-shell">
       <Sidebar />
       <main className="dashboard-main">
-        <div className="page-header">
-          <h1>Apply for a Stall</h1>
-          <p>Submit your details to request a stall at an upcoming event.</p>
-        </div>
-
-        <div style={{ padding: "0 2rem 3rem" }}>
-          <form className="card application-form" onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label className="form-label">Event *</label>
-              <select
-                className="form-input form-select"
-                name="eventId"
-                value={formData.eventId}
-                onChange={handleChange}
-                required
-              >
-                <option value="">Select an event</option>
-                {events.map((event) => (
-                  <option key={event.id} value={event.id}>
-                    {event.name}
-                  </option>
-                ))}
-              </select>
+        <header className="topbar seller-application-topbar">
+          <div className="topbar-left">
+            <div className="topbar-titles">
+              <h1>Apply for a Stall</h1>
+              <p>Request a selling space at an upcoming campus event.</p>
             </div>
+          </div>
+          <div className="seller-application-progress-label">
+            <span>{progress}% complete</span>
+            <div>
+              <i style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+        </header>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "1rem",
-              }}
+        <div className="dashboard-content seller-application-content">
+          <div className="seller-application-intro">
+            <div>
+              <span>Seller application</span>
+              <h2>Bring your products to the campus community.</h2>
+              <p>
+                Tell the event team what you sell and the space you need.
+                Required fields are marked with an asterisk.
+              </p>
+            </div>
+            <FiShoppingBag aria-hidden="true" />
+          </div>
+
+          <div className="seller-application-layout">
+            <form
+              className="seller-application-form"
+              onSubmit={handleSubmit}
+              noValidate
             >
-              <div className="form-group">
-                <label className="form-label">Stall Name *</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  name="stallName"
-                  value={formData.stallName}
-                  onChange={handleChange}
-                  placeholder="e.g. Sweet Finds PH"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Business Name *</label>
-                <input
-                  className="form-input"
-                  type="text"
-                  name="businessName"
-                  value={formData.businessName}
-                  onChange={handleChange}
-                  placeholder="Your registered business name"
-                  required
-                />
-              </div>
-            </div>
+              <section>
+                <div className="seller-application-section-heading">
+                  <span>01</span>
+                  <div>
+                    <h3>Choose an event</h3>
+                    <p>Select where you would like to operate your stall.</p>
+                  </div>
+                </div>
 
-            <div className="form-group">
-              <label className="form-label">Product Category *</label>
-              <select
-                className="form-input form-select"
-                name="productCategory"
-                value={formData.productCategory}
-                onChange={handleChange}
-                required
-              >
-                {STALL_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {CATEGORY_LABELS[c]}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Product List *</label>
-              <textarea
-                className="form-input"
-                name="productList"
-                value={formData.productList}
-                onChange={handleChange}
-                placeholder="List the products you plan to sell, separated by commas"
-                rows={3}
-                style={{ resize: "vertical" }}
-                required
-              />
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "1rem",
-              }}
-            >
-              <div className="form-group">
-                <label className="form-label">
-                  Preferred Stall Size (sqm) *
-                </label>
-                <input
-                  className="form-input"
-                  type="number"
-                  name="preferredStallSize"
-                  value={formData.preferredStallSize}
-                  onChange={handleChange}
-                  min="1"
-                  placeholder="e.g. 9"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Duration (days) *</label>
-                <input
-                  className="form-input"
-                  type="number"
-                  name="duration"
-                  value={formData.duration}
-                  onChange={handleChange}
-                  min="1"
-                  placeholder="e.g. 3"
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Contact Info *</label>
-              <input
-                className="form-input"
-                type="text"
-                name="contactInfo"
-                value={formData.contactInfo}
-                onChange={handleChange}
-                placeholder="Phone number or email"
-                required
-              />
-            </div>
-
-            <div style={{ paddingTop: "0.5rem" }}>
-              <button
-                className="btn btn-primary"
-                type="submit"
-                disabled={submitting}
-              >
-                {submitting ? (
-                  <span className="spinner" />
-                ) : (
-                  <>
-                    <FiSend size={15} /> Submit Application
-                  </>
+                {eventsError && (
+                  <div className="seller-application-alert" role="alert">
+                    <FiAlertCircle />
+                    <span>{eventsError}</span>
+                    <button type="button" onClick={loadEvents}>
+                      <FiRefreshCw /> Retry
+                    </button>
+                  </div>
                 )}
-              </button>
-            </div>
-          </form>
+
+                <div className="seller-application-field wide">
+                  <label htmlFor="application-event">
+                    Event <em>*</em>
+                  </label>
+                  <select
+                    id="application-event"
+                    name="eventId"
+                    value={formData.eventId}
+                    onChange={handleChange}
+                    disabled={eventsLoading || Boolean(eventsError)}
+                    className={errors.eventId ? "invalid" : ""}
+                  >
+                    <option value="">
+                      {eventsLoading
+                        ? "Loading events…"
+                        : events.length
+                          ? "Select an event"
+                          : "No upcoming events available"}
+                    </option>
+                    {events.map((eventItem) => (
+                      <option key={eventItem.id} value={eventItem.id}>
+                        {eventItem.name}
+                      </option>
+                    ))}
+                  </select>
+                  {errors.eventId && <small>{errors.eventId}</small>}
+                </div>
+
+                {selectedEvent && (
+                  <div className="seller-application-event-card">
+                    <span>
+                      <FiCalendar />
+                    </span>
+                    <div>
+                      <strong>{selectedEvent.name}</strong>
+                      <p>
+                        <FiCalendar />{" "}
+                        {formatEventDate(
+                          selectedEvent.date,
+                          selectedEvent.endDate,
+                        )}
+                      </p>
+                      <p>
+                        <FiMapPin /> {selectedEvent.location}
+                      </p>
+                    </div>
+                    <FiCheckCircle />
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="seller-application-section-heading">
+                  <span>02</span>
+                  <div>
+                    <h3>Business details</h3>
+                    <p>Help reviewers understand your campus business.</p>
+                  </div>
+                </div>
+
+                <div className="seller-application-fields">
+                  <div className="seller-application-field">
+                    <label htmlFor="application-stall-name">
+                      Stall name <em>*</em>
+                    </label>
+                    <input
+                      id="application-stall-name"
+                      name="stallName"
+                      value={formData.stallName}
+                      onChange={handleChange}
+                      placeholder="Sweet Finds PH"
+                      className={errors.stallName ? "invalid" : ""}
+                    />
+                    {errors.stallName && <small>{errors.stallName}</small>}
+                  </div>
+                  <div className="seller-application-field">
+                    <label htmlFor="application-business-name">
+                      Business name <em>*</em>
+                    </label>
+                    <input
+                      id="application-business-name"
+                      name="businessName"
+                      value={formData.businessName}
+                      onChange={handleChange}
+                      placeholder="Your registered business name"
+                      className={errors.businessName ? "invalid" : ""}
+                    />
+                    {errors.businessName && (
+                      <small>{errors.businessName}</small>
+                    )}
+                  </div>
+                  <div className="seller-application-field">
+                    <label htmlFor="application-category">
+                      Product category <em>*</em>
+                    </label>
+                    <select
+                      id="application-category"
+                      name="productCategory"
+                      value={formData.productCategory}
+                      onChange={handleChange}
+                    >
+                      {STALL_CATEGORIES.map((category) => (
+                        <option key={category} value={category}>
+                          {CATEGORY_LABELS[category]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="seller-application-field">
+                    <label htmlFor="application-contact">
+                      Contact information <em>*</em>
+                    </label>
+                    <input
+                      id="application-contact"
+                      name="contactInfo"
+                      value={formData.contactInfo}
+                      onChange={handleChange}
+                      placeholder="Phone number or email"
+                      className={errors.contactInfo ? "invalid" : ""}
+                    />
+                    {errors.contactInfo && <small>{errors.contactInfo}</small>}
+                  </div>
+                  <div className="seller-application-field wide">
+                    <label htmlFor="application-products">
+                      Products you plan to sell <em>*</em>
+                    </label>
+                    <textarea
+                      id="application-products"
+                      name="productList"
+                      rows="4"
+                      maxLength="600"
+                      value={formData.productList}
+                      onChange={handleChange}
+                      placeholder="Example: cookies, brownies, bottled coffee"
+                      className={errors.productList ? "invalid" : ""}
+                    />
+                    <i>{formData.productList.length}/600</i>
+                    {errors.productList && <small>{errors.productList}</small>}
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <div className="seller-application-section-heading">
+                  <span>03</span>
+                  <div>
+                    <h3>Space requirements</h3>
+                    <p>
+                      Give the organizers enough information to plan the layout.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="seller-application-fields">
+                  <div className="seller-application-field">
+                    <label htmlFor="application-size">
+                      Preferred stall size <em>*</em>
+                    </label>
+                    <div
+                      className={`seller-application-unit ${errors.preferredStallSize ? "invalid" : ""}`}
+                    >
+                      <input
+                        id="application-size"
+                        type="number"
+                        name="preferredStallSize"
+                        min="1"
+                        step="1"
+                        value={formData.preferredStallSize}
+                        onChange={handleChange}
+                        placeholder="9"
+                      />
+                      <span>sqm</span>
+                    </div>
+                    {errors.preferredStallSize && (
+                      <small>{errors.preferredStallSize}</small>
+                    )}
+                  </div>
+                  <div className="seller-application-field">
+                    <label htmlFor="application-duration">
+                      Duration <em>*</em>
+                    </label>
+                    <div
+                      className={`seller-application-unit ${errors.duration ? "invalid" : ""}`}
+                    >
+                      <input
+                        id="application-duration"
+                        type="number"
+                        name="duration"
+                        min="1"
+                        step="1"
+                        value={formData.duration}
+                        onChange={handleChange}
+                        placeholder="3"
+                      />
+                      <span>days</span>
+                    </div>
+                    {errors.duration && <small>{errors.duration}</small>}
+                  </div>
+                </div>
+              </section>
+
+              <div className="seller-application-actions">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => navigate(-1)}
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={submitting || eventsLoading || !events.length}
+                >
+                  {submitting ? (
+                    <span className="seller-application-spinner" />
+                  ) : (
+                    <FiSend />
+                  )}
+                  {submitting ? "Submitting…" : "Submit application"}
+                </button>
+              </div>
+            </form>
+
+            <aside className="seller-application-aside">
+              <div className="seller-application-summary">
+                <span>Application summary</span>
+                <h3>{formData.stallName.trim() || "Your stall"}</h3>
+                <p>{CATEGORY_LABELS[formData.productCategory]}</p>
+                <dl>
+                  <div>
+                    <dt>
+                      <FiCalendar /> Event
+                    </dt>
+                    <dd>{selectedEvent?.name || "Not selected"}</dd>
+                  </div>
+                  <div>
+                    <dt>
+                      <FiMapPin /> Space
+                    </dt>
+                    <dd>
+                      {formData.preferredStallSize
+                        ? `${formData.preferredStallSize} sqm`
+                        : "Not specified"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>
+                      <FiClock /> Duration
+                    </dt>
+                    <dd>
+                      {formData.duration
+                        ? `${formData.duration} day${formData.duration === "1" ? "" : "s"}`
+                        : "Not specified"}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="seller-application-note">
+                <FiInfo />
+                <div>
+                  <strong>What happens next?</strong>
+                  <p>
+                    An administrator will review your application. You can
+                    monitor its status from My Stall.
+                  </p>
+                </div>
+              </div>
+            </aside>
+          </div>
         </div>
       </main>
-
-      <style>{`
-        .application-form {
-          max-width: 640px; padding: 1.75rem;
-          display: flex; flex-direction: column; gap: 1.1rem;
-        }
-      `}</style>
     </div>
   );
-};
-
-export default SellerApplicationForm;
+}

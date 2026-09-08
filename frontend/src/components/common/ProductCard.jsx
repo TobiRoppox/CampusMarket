@@ -1,167 +1,284 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { FiShoppingCart, FiStar, FiCheck } from "react-icons/fi";
+import {
+  FiAlertCircle,
+  FiCheck,
+  FiCheckCircle,
+  FiHeart,
+  FiShoppingBag,
+  FiShoppingCart,
+  FiStar,
+} from "react-icons/fi";
 import { useCart } from "../../context/CartContext.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
 import { behaviorService } from "../../services/api.js";
+import favoriteService from "../../services/favoriteService.js";
 import toast from "react-hot-toast";
+
+const formatPrice = (price) =>
+  `₱${Number(price || 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const toCategoryClass = (category) =>
+  String(category || "other")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "other";
 
 export default function ProductCard({ product, showStall = true }) {
   const { addItem } = useCart();
   const { user } = useAuth();
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
+  const [imageFailed, setImageFailed] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [savingFavorite, setSavingFavorite] = useState(false);
+
+  const stock = Number(product.stock || 0);
+  const isOutOfStock = stock < 1;
+  const isLowStock = stock > 0 && stock <= 5;
+  const rating = Number(product.avg_rating || 0);
+  const category = product.category || "Other";
+  const categoryClass = toCategoryClass(category);
+  const showCartAction = !user || user.role === "buyer";
+  const showFavoriteAction = user?.role === "buyer";
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [product.image_url]);
+
+  useEffect(() => {
+    if (!added) return undefined;
+    const timer = window.setTimeout(() => setAdded(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [added]);
+
+  useEffect(() => {
+    if (!showFavoriteAction || !user?.id) {
+      setIsFavorite(false);
+      return undefined;
+    }
+
+    let active = true;
+    favoriteService.isFavorite(user.id, product.id).then((saved) => {
+      if (active) setIsFavorite(saved);
+    });
+
+    const unsubscribe = favoriteService.subscribe(user.id, (favorites) => {
+      if (active) {
+        setIsFavorite(
+          favorites.some(
+            (savedProduct) => String(savedProduct.id) === String(product.id),
+          ),
+        );
+      }
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [product.id, showFavoriteAction, user?.id]);
 
   const handleView = () => {
-    if (user) behaviorService.log(product.id, "view").catch(() => {});
+    if (user) {
+      behaviorService.log(product.id, "view").catch(() => {});
+    }
   };
 
-  const handleAddToCart = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const handleAddToCart = async () => {
     if (!user) {
-      toast.error("Please login to add items to cart");
+      toast.error("Please log in to add items to your cart");
       return;
     }
+
     if (user.role !== "buyer") {
-      toast.error("Only buyers can add items to cart");
+      toast.error("Only buyers can add items to the cart");
       return;
     }
-    if (product.stock < 1) {
-      toast.error("Out of stock");
+
+    if (isOutOfStock) {
+      toast.error("This product is currently out of stock");
       return;
     }
+
     try {
       setAdding(true);
       await addItem(product);
       setAdded(true);
-      toast.success("Added to cart!");
-      setTimeout(() => setAdded(false), 2000);
-    } catch (err) {
-      toast.error(err.response?.data?.error || "Failed to add to cart");
+      toast.success("Added to cart");
+    } catch (error) {
+      toast.error(error.response?.data?.error || "Failed to add item to cart");
     } finally {
       setAdding(false);
     }
   };
 
-  const formatPrice = (price) =>
-    `₱${Number(price).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+  const handleToggleFavorite = async () => {
+    if (!user) {
+      toast.error("Please log in to save favorites");
+      return;
+    }
+
+    if (user.role !== "buyer") {
+      toast.error("Favorites are available for buyer accounts");
+      return;
+    }
+
+    try {
+      setSavingFavorite(true);
+      const result = await favoriteService.toggle(user.id, product);
+      setIsFavorite(result.saved);
+      toast.success(
+        result.saved ? "Saved to favorites" : "Removed from favorites",
+      );
+    } catch {
+      toast.error("Could not update favorites");
+    } finally {
+      setSavingFavorite(false);
+    }
+  };
 
   return (
-    <Link to={`/products/${product.id}`} className="product-card card card-hover" onClick={handleView}>
-      {/* Image */}
-      <div className="product-image-wrap">
-        {product.image_url ? (
-          <img src={product.image_url} alt={product.name} className="product-img" loading="lazy" />
-        ) : (
-          <div className="product-img-placeholder">🛍️</div>
-        )}
-        <span className={`badge cat-badge cat-${product.category}`}>
-          {product.category}
-        </span>
-        {product.stock === 0 && (
-          <div className="out-of-stock-overlay">Out of Stock</div>
-        )}
-      </div>
+    <article
+      className={`product-card card ${isOutOfStock ? "is-out-of-stock" : ""} ${showCartAction ? "has-cart-action" : ""}`}
+    >
+      <Link
+        to={`/products/${product.id}`}
+        className="product-card-link"
+        onClick={handleView}
+        aria-label={`View ${product.name}`}
+      >
+        <div className="product-image-wrap">
+          {product.image_url && !imageFailed ? (
+            <img
+              src={product.image_url}
+              alt={product.name}
+              className="product-img"
+              loading="lazy"
+              onError={() => setImageFailed(true)}
+            />
+          ) : (
+            <div className="product-img-placeholder" aria-hidden="true">
+              <span>
+                <FiShoppingBag />
+              </span>
+            </div>
+          )}
 
-      {/* Body */}
-      <div className="product-body">
-        {showStall && product.stalls?.name && (
-          <p className="product-stall">{product.stalls.name}</p>
-        )}
-        <h3 className="product-name" title={product.name}>{product.name}</h3>
+          <span className={`badge cat-badge cat-${categoryClass}`}>
+            {category}
+          </span>
 
-        {/* Rating */}
-        {product.avg_rating && (
-          <div className="product-rating">
-            <FiStar size={12} fill="currentColor" />
-            <span>{product.avg_rating}</span>
-            <span className="text-muted">({product.review_count})</span>
-          </div>
-        )}
+          {isLowStock && (
+            <span className="product-stock-badge">
+              <FiAlertCircle aria-hidden="true" /> Only {stock} left
+            </span>
+          )}
 
-        <div className="product-footer">
-          <span className="product-price">{formatPrice(product.price)}</span>
-          {user?.role === "buyer" && (
-            <button
-              className={`add-to-cart-btn ${added ? "added" : ""}`}
-              onClick={handleAddToCart}
-              disabled={adding || product.stock === 0}
-              title="Add to cart"
-            >
-              {adding ? (
-                <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
-              ) : added ? (
-                <FiCheck size={15} />
-              ) : (
-                <FiShoppingCart size={15} />
-              )}
-            </button>
+          {isOutOfStock && (
+            <div className="out-of-stock-overlay">
+              <span>Out of stock</span>
+            </div>
           )}
         </div>
 
-        {product.stock > 0 && product.stock <= 5 && (
-          <p className="low-stock">Only {product.stock} left!</p>
-        )}
-      </div>
+        <div className="product-body">
+          {showStall && product.stalls?.name && (
+            <div className="product-stall-row">
+              <p className="product-stall">{product.stalls.name}</p>
+              <FiCheckCircle aria-label="Verified campus seller" />
+            </div>
+          )}
 
-      <style>{`
-        .product-card {
-          display: flex; flex-direction: column;
-          text-decoration: none; color: inherit;
-          cursor: pointer;
-        }
-        .product-image-wrap {
-          position: relative; overflow: hidden;
-          aspect-ratio: 4/3; background: var(--gray-100);
-        }
-        .product-img {
-          width: 100%; height: 100%; object-fit: cover;
-          transition: transform 0.4s ease;
-        }
-        .product-card:hover .product-img { transform: scale(1.05); }
-        .product-img-placeholder {
-          width: 100%; height: 100%; display: flex;
-          align-items: center; justify-content: center;
-          font-size: 2.5rem; color: var(--gray-300);
-        }
-        .cat-badge {
-          position: absolute; top: 8px; left: 8px;
-          text-transform: capitalize; font-size: 0.7rem;
-        }
-        .cat-food        { background: #FEF9C3; color: #92400E; }
-        .cat-clothing    { background: #EDE9FE; color: #5B21B6; }
-        .cat-electronics { background: #DBEAFE; color: #1E40AF; }
-        .cat-accessories { background: #FCE7F3; color: #9D174D; }
-        .cat-student-made{ background: var(--green-100); color: var(--green-800); }
-        .cat-other       { background: var(--gray-100); color: var(--gray-700); }
-        .out-of-stock-overlay {
-          position: absolute; inset: 0; background: rgba(0,0,0,0.45);
-          display: flex; align-items: center; justify-content: center;
-          color: #fff; font-weight: 600; font-size: 0.875rem;
-        }
-        .product-body { padding: 0.875rem; display: flex; flex-direction: column; gap: 0.3rem; flex: 1; }
-        .product-stall { font-size: 0.75rem; color: var(--color-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
-        .product-name {
-          font-size: 0.9rem; font-weight: 600; color: var(--gray-800);
-          display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-          line-height: 1.4;
-        }
-        .product-rating { display: flex; align-items: center; gap: 3px; font-size: 0.75rem; color: var(--gold-600); }
-        .product-footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 0.5rem; }
-        .product-price { font-size: 1.05rem; font-weight: 700; color: var(--color-primary); }
-        .add-to-cart-btn {
-          width: 34px; height: 34px; border-radius: var(--radius-md);
-          background: var(--color-primary); color: #fff;
-          display: flex; align-items: center; justify-content: center;
-          transition: var(--transition-fast); flex-shrink: 0;
-          border: none;
-        }
-        .add-to-cart-btn:hover:not(:disabled) { background: var(--color-primary-hover); transform: scale(1.08); }
-        .add-to-cart-btn.added { background: var(--color-success); }
-        .add-to-cart-btn:disabled { opacity: 0.55; }
-        .low-stock { font-size: 0.75rem; color: var(--color-danger); font-weight: 500; }
-      `}</style>
-    </Link>
+          <h3 className="product-name" title={product.name}>
+            {product.name}
+          </h3>
+
+          <div className="product-rating-row">
+            {rating > 0 ? (
+              <div
+                className="product-rating"
+                aria-label={`${rating} out of 5 stars`}
+              >
+                <FiStar aria-hidden="true" />
+                <strong>{rating.toFixed(1)}</strong>
+                <span>({product.review_count || 0})</span>
+              </div>
+            ) : (
+              <span className="product-no-rating">New arrival</span>
+            )}
+          </div>
+
+          <div className="product-footer">
+            <div className="product-price-group">
+              <span className="product-price">
+                {formatPrice(product.price)}
+              </span>
+              <span className="product-price-note">Campus price</span>
+            </div>
+          </div>
+        </div>
+      </Link>
+
+      {showFavoriteAction && (
+        <button
+          type="button"
+          className={`product-favorite-btn ${isFavorite ? "is-favorite" : ""}`}
+          onClick={handleToggleFavorite}
+          disabled={savingFavorite}
+          aria-pressed={isFavorite}
+          aria-label={
+            isFavorite
+              ? `Remove ${product.name} from favorites`
+              : `Save ${product.name} to favorites`
+          }
+          title={isFavorite ? "Remove from favorites" : "Save to favorites"}
+        >
+          {savingFavorite ? (
+            <span
+              className="spinner product-favorite-spinner"
+              aria-hidden="true"
+            />
+          ) : (
+            <FiHeart aria-hidden="true" />
+          )}
+        </button>
+      )}
+
+      {showCartAction && (
+        <button
+          type="button"
+          className={`add-to-cart-btn ${added ? "added" : ""}`}
+          onClick={handleAddToCart}
+          disabled={adding || isOutOfStock}
+          aria-label={
+            isOutOfStock
+              ? `${product.name} is out of stock`
+              : added
+                ? `${product.name} added to cart`
+                : `Add ${product.name} to cart`
+          }
+          title={isOutOfStock ? "Out of stock" : "Add to cart"}
+        >
+          {adding ? (
+            <span className="spinner product-cart-spinner" aria-hidden="true" />
+          ) : added ? (
+            <FiCheck aria-hidden="true" />
+          ) : (
+            <FiShoppingCart aria-hidden="true" />
+          )}
+        </button>
+      )}
+
+      {added && (
+        <span className="sr-only" aria-live="polite">
+          Added to cart
+        </span>
+      )}
+    </article>
   );
 }

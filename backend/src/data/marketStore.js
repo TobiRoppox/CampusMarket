@@ -1,4 +1,6 @@
 import fs from "fs";
+import { getPlan } from "../config/plans.js";
+import { cancellationDeadline, canBuyerCancel } from "../config/orderCancellation.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import bcrypt from "bcryptjs";
@@ -6,7 +8,7 @@ import { randomUUID } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const dataFile = path.join(__dirname, "market-data.json");
+const dataFile = process.env.MARKET_DATA_FILE || path.join(__dirname, "market-data.json");
 
 const seedPasswordHash = bcrypt.hashSync("password123", 12);
 
@@ -61,8 +63,9 @@ const buildSeedState = () => {
         id: stallId,
         owner_id: sellerId,
         name: "Campus Eats",
+        logo_url: "/images/buyer/campus-eats-logo.png",
         description: "Fresh student favorites and snacks",
-        banner_url: "",
+        banner_url: "/images/buyer/campus-eats-banner.png",
         location: "Main Canteen",
         category: "food",
         status: "approved",
@@ -80,7 +83,7 @@ const buildSeedState = () => {
         price: 89,
         stock: 15,
         category: "food",
-        image_url: "",
+        image_url: "/images/buyer/product-adobo.png",
         is_active: true,
         is_featured: true,
         view_count: 42,
@@ -94,7 +97,7 @@ const buildSeedState = () => {
         price: 450,
         stock: 8,
         category: "clothing",
-        image_url: "",
+        image_url: "/images/buyer/product-hoodie.png",
         is_active: true,
         is_featured: false,
         view_count: 21,
@@ -108,7 +111,7 @@ const buildSeedState = () => {
         price: 299,
         stock: 10,
         category: "electronics",
-        image_url: "",
+        image_url: "/images/buyer/product-charger.png",
         is_active: true,
         is_featured: true,
         view_count: 33,
@@ -139,6 +142,8 @@ const buildSeedState = () => {
     ],
     eventStalls: [],
     applications: [],
+    posSales: [],
+    auditLog: [],
   };
 };
 
@@ -153,9 +158,11 @@ const ensureState = () => {
       if (!state.events) state.events = [];
       if (!state.eventStalls) state.eventStalls = [];
       if (!state.applications) state.applications = [];
+      state.posSales ??= [];
+      state.auditLog ??= [];
       return state;
-    } catch {
-      // ignore and fall back to seed state
+    } catch (error) {
+      throw new Error(`Unable to read marketplace data: ${error.message}`);
     }
   }
 
@@ -166,10 +173,29 @@ const ensureState = () => {
 
 const saveState = () => {
   if (!state) return;
-  fs.writeFileSync(dataFile, JSON.stringify(state, null, 2));
+  const temporary = `${dataFile}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(state, null, 2));
+  fs.renameSync(temporary, dataFile);
 };
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
+const safeUser = ({ password_hash, ...user }) => clone(user);
+const inPeriod = (createdAt, period) => new Date(createdAt).getTime() >= Date.now() - Math.max(1, Math.min(365, Number(period) || 30)) * 86400000;
+const publicUser = (user) => user ? { id: user.id, name: user.name, role: user.role, avatar_url: user.avatar_url } : null;
+const approvedUser = (id) => {
+  const user = findUserById(id);
+  return user && user.status === "approved" && !user.is_banned;
+};
+const publicStall = (stall) => Boolean(stall && stall.status === "approved" && stall.is_active && approvedUser(stall.owner_id));
+const stallDetails = (stall) => ({ ...stall,
+  seller_name: findUserById(stall.owner_id)?.name || "Campus seller",
+  product_count: getSellerProductCount(stall.id),
+  plan: getPlan(stall.tier),
+});
+const audit = (actorId, action, targetId, note) => {
+  ensureState().auditLog.push({ id: randomUUID(), actor_id: actorId, action, target_id: targetId, note, created_at: new Date().toISOString() });
+};
 
 const findUserByEmail = (email) =>
   ensureState().users.find((u) => u.email === email);
@@ -184,7 +210,15 @@ const getSellerProductCount = (stallId) =>
   ensureState().products.filter((p) => p.stall_id === stallId).length;
 
 export const authStore = {
-  async registerUser({ name, email, password, role = "buyer" }) {
+  async startSelling(userId, payload) {
+    const user = findUserById(userId);
+    if (!approvedUser(userId) || !["buyer", "seller"].includes(user.role)) fail("An approved campus account is required.", 403);
+    const stall = await stallStore.create(userId, payload);
+    user.role = "seller";
+    saveState();
+    return { user: safeUser(user), stall };
+  },
+  async registerUser({ name, email, password, role = "buyer", campus_id, affiliation, department, store_name, campus_location }) {
     const current = ensureState();
     if (findUserByEmail(email)) {
       const error = new Error("Email already registered");
@@ -192,21 +226,28 @@ export const authStore = {
       throw error;
     }
 
+    if (current.users.some((user) => user.campus_id?.toLowerCase() === campus_id?.toLowerCase())) fail("This campus ID is already registered.", 409);
     const user = {
       id: randomUUID(),
       name,
       email,
       password_hash: bcrypt.hashSync(password, 12),
       role,
-      status: role === "seller" ? "pending" : "approved",
+      status: "pending",
+      campus_id, affiliation, department, campus: "CSUCC",
       avatar_url: "",
       is_banned: false,
       created_at: new Date().toISOString(),
     };
 
     current.users.push(user);
+    if (role === "seller") current.stalls.push({
+      id: randomUUID(), owner_id: user.id, name: store_name, location: campus_location,
+      description: "", logo_url: "", banner_url: "", category: "other", tier: "free",
+      status: "pending", is_active: false, created_at: user.created_at,
+    });
     saveState();
-    return clone(user);
+    return safeUser(user);
   },
 
   async loginUser(email, password) {
@@ -242,7 +283,7 @@ export const authStore = {
       throw error;
     }
 
-    return clone(user);
+    return safeUser(user);
   },
 
   async updateUserProfile(userId, updates) {
@@ -254,28 +295,57 @@ export const authStore = {
       throw error;
     }
 
-    if (updates.name) user.name = updates.name;
+    if (updates.name) {
+      if (typeof updates.name !== "string" || updates.name.trim().length < 2 || updates.name.trim().length > 80) fail("Enter a valid full name.");
+      if (updates.name.trim() !== user.name && user.role !== "admin") {
+        user.status = "pending";
+        user.review_note = "Your name changed. An administrator will recheck your campus credentials.";
+      }
+      user.name = updates.name.trim();
+    }
     if (updates.avatar_url !== undefined) user.avatar_url = updates.avatar_url;
     saveState();
-    return clone(user);
+    return safeUser(user);
   },
 
-  async listUsers({ role, q, page = 1, limit = 20 } = {}) {
+  async listUsers({ role, status, q, page = 1, limit = 20 } = {}) {
     const current = ensureState();
     const items = current.users.filter((user) => {
       const matchRole = !role || user.role === role;
       const value = `${user.name} ${user.email}`.toLowerCase();
       const matchQuery = !q || value.includes(q.toLowerCase());
-      return matchRole && matchQuery;
+      return matchRole && matchQuery && (!status || user.status === status);
     });
 
     const start = (Number(page) - 1) * Number(limit);
     const end = start + Number(limit);
     return {
-      data: clone(items.slice(start, end)),
+      data: items.slice(start, end).map(safeUser),
       total: items.length,
       page: Number(page),
     };
+  },
+
+  async submitCredentials(userId, payload) {
+    const current = ensureState();
+    const user = findUserById(userId);
+    if (!user || user.is_banned) fail("Account unavailable.", 403);
+    if (user.status === "approved") fail("Approved credentials cannot be changed here.", 409);
+    if (current.users.some((entry) => entry.id !== userId && entry.campus_id?.toLowerCase() === payload.campus_id.toLowerCase())) fail("This campus ID is already registered.", 409);
+    Object.assign(user, payload, { status: "pending", review_note: "", campus: "CSUCC" });
+    saveState();
+    return safeUser(user);
+  },
+
+  async reviewRegistration(userId, actorId, { status, note, credentials_checked }) {
+    const user = findUserById(userId);
+    if (!user || user.role === "admin") fail("Registration not found.", 404);
+    if (user.status !== "pending") fail("This registration has already been reviewed.", 409);
+    if (status === "approved" && (!credentials_checked || !user.campus_id || !user.affiliation || !user.department)) fail("Check complete credentials against CSUCC records before approving.");
+    Object.assign(user, { status, review_note: note, reviewed_by: actorId, reviewed_at: new Date().toISOString() });
+    audit(actorId, `registration.${status}`, userId, note);
+    saveState();
+    return safeUser(user);
   },
 
   async banUser(userId, ban) {
@@ -287,9 +357,10 @@ export const authStore = {
       throw error;
     }
 
+    if (user.role === "admin") fail("Administrator accounts cannot be suspended here.", 403);
     user.is_banned = Boolean(ban);
     saveState();
-    return clone(user);
+    return safeUser(user);
   },
 };
 
@@ -304,7 +375,7 @@ export const stallStore = {
       return matchStatus && matchActive && matchQuery;
     });
 
-    return clone(items);
+    return clone(items.map(stallDetails));
   },
 
   async getById(stallId) {
@@ -314,14 +385,14 @@ export const stallStore = {
       error.status = 404;
       throw error;
     }
-    return clone(stall);
+    return clone(stallDetails(stall));
   },
 
   async getMy(ownerId) {
     const current = ensureState();
     const stall = current.stalls.find((entry) => entry.owner_id === ownerId);
     if (!stall) return null;
-    return clone(stall);
+    return clone(stallDetails(stall));
   },
 
   async create(ownerId, payload) {
@@ -339,7 +410,8 @@ export const stallStore = {
       name: payload.name,
       description: payload.description || "",
       banner_url: payload.banner_url || "",
-      location: payload.location || "Campus",
+      location: payload.location,
+      logo_url: payload.logo_url || "",
       category: payload.category || "other",
       status: "pending",
       tier: "free",
@@ -349,7 +421,7 @@ export const stallStore = {
 
     current.stalls.push(stall);
     saveState();
-    return clone(stall);
+    return clone(stallDetails(stall));
   },
 
   async update(stallId, ownerId, payload) {
@@ -359,9 +431,22 @@ export const stallStore = {
     if (stall.owner_id !== ownerId)
       throw Object.assign(new Error("Forbidden"), { status: 403 });
 
-    Object.assign(stall, payload);
+    const allowed = ["name", "description", "banner_url", "logo_url", "location", "category", "contact_number", "operating_hours", "is_active"];
+    for (const key of allowed) if (payload[key] !== undefined) stall[key] = payload[key];
+    if (stall.status !== "approved") stall.is_active = false;
     saveState();
-    return clone(stall);
+    return clone(stallDetails(stall));
+  },
+
+  async setPlan(stallId, tier, actorId) {
+    const stall = findStallById(stallId);
+    if (!stall) fail("Stall not found.", 404);
+    if (!["free", "premium"].includes(tier)) fail("Invalid plan.");
+    if (getSellerProductCount(stallId) > getPlan(tier).listing_limit) fail("Remove excess listings before changing to this plan.", 409);
+    stall.tier = tier;
+    audit(actorId, "stall.plan", stallId, tier);
+    saveState();
+    return clone(stallDetails(stall));
   },
 
   async updateStatus(stallId, status) {
@@ -369,10 +454,12 @@ export const stallStore = {
     const stall = current.stalls.find((entry) => entry.id === stallId);
     if (!stall) throw new Error("Stall not found");
 
+    if (!["approved", "rejected", "suspended"].includes(status)) fail("Invalid stall status.");
+    if (status === "approved" && !approvedUser(stall.owner_id)) fail("Approve the owner's campus registration first.", 403);
     stall.status = status;
-    if (status === "approved") stall.is_active = true;
+    stall.is_active = status === "approved";
     saveState();
-    return clone(stall);
+    return clone(stallDetails(stall));
   },
 };
 
@@ -384,15 +471,21 @@ export const productStore = {
     limit = 20,
     stallId,
     activeOnly = true,
+    publicOnly = true,
+    featured = false,
+    min_price, max_price,
   } = {}) {
     const current = ensureState();
     const filtered = current.products.filter((product) => {
-      const matchActive = !activeOnly || product.is_active;
+      const stall = findStallById(product.stall_id);
+      const matchActive = (!publicOnly || publicStall(stall)) && (!activeOnly || product.is_active);
+      const matchPrice = (min_price == null || product.price >= Number(min_price)) && (max_price == null || product.price <= Number(max_price));
+      const matchFeatured = !featured || stall?.tier === "premium";
       const matchCategory = !category || product.category === category;
       const matchStall = !stallId || product.stall_id === stallId;
-      const haystack = `${product.name} ${product.description}`.toLowerCase();
+      const haystack = `${product.name} ${product.description} ${stall?.name || ""}`.toLowerCase();
       const matchQuery = !q || haystack.includes(q.toLowerCase());
-      return matchActive && matchCategory && matchStall && matchQuery;
+      return matchActive && matchCategory && matchStall && matchQuery && matchPrice && matchFeatured;
     });
 
     const start = (Number(page) - 1) * Number(limit);
@@ -405,7 +498,7 @@ export const productStore = {
     return { data, total: filtered.length, page: Number(page) };
   },
 
-  async getById(productId) {
+  async getById(productId, actor) {
     const current = ensureState();
     const product = current.products.find((entry) => entry.id === productId);
     if (!product) {
@@ -414,6 +507,8 @@ export const productStore = {
       throw error;
     }
 
+    const stall = findStallById(product.stall_id);
+    if ((!product.is_active || !publicStall(stall)) && actor?.role !== "admin" && actor?.id !== stall?.owner_id) fail("Product not found.", 404);
     product.view_count = (product.view_count || 0) + 1;
     saveState();
     return clone({
@@ -427,11 +522,12 @@ export const productStore = {
     const stall = current.stalls.find((entry) => entry.id === stallId);
     if (!stall) throw new Error("Stall not found");
 
+    if (stall.status !== "approved" || !approvedUser(stall.owner_id)) fail("An approved store and account are required.", 403);
     const count = current.products.filter(
       (product) => product.stall_id === stallId,
     ).length;
-    if (stall.tier === "free" && count >= 15) {
-      const error = new Error("Free tier listing cap reached");
+    if (count >= getPlan(stall.tier).listing_limit) {
+      const error = new Error(`${getPlan(stall.tier).name} plan limit of ${getPlan(stall.tier).listing_limit} listings reached`);
       error.status = 403;
       throw error;
     }
@@ -456,12 +552,16 @@ export const productStore = {
     return clone({ ...product, stalls: stall });
   },
 
-  async update(productId, payload) {
+  async update(productId, payload, actor) {
     const current = ensureState();
     const product = current.products.find((entry) => entry.id === productId);
     if (!product) throw new Error("Product not found");
 
-    Object.assign(product, payload);
+    const stall = findStallById(product.stall_id);
+    if (actor?.role !== "admin" && actor?.id !== stall?.owner_id) fail("You can only edit your own products.", 403);
+    for (const key of ["name", "description", "price", "stock", "category", "image_url", "is_active"]) {
+      if (payload[key] !== undefined) product[key] = payload[key];
+    }
     saveState();
     return clone({
       ...product,
@@ -469,10 +569,12 @@ export const productStore = {
     });
   },
 
-  async remove(productId) {
+  async remove(productId, actor) {
     const current = ensureState();
     const idx = current.products.findIndex((entry) => entry.id === productId);
     if (idx < 0) throw new Error("Product not found");
+    const stall = findStallById(current.products[idx].stall_id);
+    if (actor?.role !== "admin" && actor?.id !== stall?.owner_id) fail("You can only delete your own products.", 403);
     current.products.splice(idx, 1);
     saveState();
     return true;
@@ -480,7 +582,7 @@ export const productStore = {
 
   async getRecommendations(userId) {
     const current = ensureState();
-    const products = current.products.filter((p) => p.is_active).slice(0, 8);
+    const products = current.products.filter((p) => p.is_active && publicStall(findStallById(p.stall_id))).slice(0, 8);
     return clone(
       products.map((product) => ({
         ...product,
@@ -496,7 +598,7 @@ export const productStore = {
     const similar = current.products
       .filter(
         (product) =>
-          product.is_active &&
+          product.is_active && publicStall(findStallById(product.stall_id)) &&
           product.category === source.category &&
           product.id !== productId,
       )
@@ -529,7 +631,10 @@ export const cartStore = {
     const current = ensureState();
     const product = current.products.find((entry) => entry.id === productId);
     if (!product) throw new Error("Product not found");
-    if (!product.is_active) throw new Error("Product is unavailable");
+    if (!product.is_active || !publicStall(findStallById(product.stall_id))) fail("Product is unavailable.", 409);
+    if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) fail("Quantity must be a positive whole number.");
+    const existingQuantity = current.carts.find((item) => item.user_id === userId && item.product_id === productId)?.quantity || 0;
+    if (existingQuantity + Number(quantity) > product.stock) fail("Insufficient stock.", 409);
 
     let entry = current.carts.find(
       (item) => item.user_id === userId && item.product_id === productId,
@@ -555,6 +660,9 @@ export const cartStore = {
       (item) => item.id === itemId && item.user_id === userId,
     );
     if (!entry) throw new Error("Cart item not found");
+    const product = findProductById(entry.product_id);
+    if (!Number.isInteger(Number(quantity)) || Number(quantity) <= 0) fail("Quantity must be a positive whole number.");
+    if (!product || !product.is_active || !publicStall(findStallById(product.stall_id)) || Number(quantity) > product.stock) fail("Product or quantity unavailable.", 409);
     entry.quantity = Number(quantity);
     saveState();
     return clone(entry);
@@ -579,8 +687,31 @@ export const cartStore = {
   },
 };
 
+const withOrderProductDetails = (order) => ({
+  ...order,
+  cancellation_deadline: cancellationDeadline(order) === null ? null : new Date(cancellationDeadline(order)).toISOString(),
+  can_cancel: canBuyerCancel(order),
+  stall: (() => {
+    const current = ensureState();
+    const product = current.products.find((entry) => entry.id === order.items?.[0]?.product_id);
+    const stall = current.stalls.find((entry) => entry.id === (order.stall_id || product?.stall_id));
+    return stall ? { id: stall.id, name: stall.name, location: stall.location } : null;
+  })(),
+  items: (order.items || []).map((item) => {
+    const product = ensureState().products.find((entry) => entry.id === item.product_id);
+    return {
+      ...item,
+      product: {
+        id: item.product_id,
+        name: item.name || item.product_name || product?.name || "Item details unavailable",
+        image_url: item.image_url ?? product?.image_url ?? null,
+      },
+    };
+  }),
+});
+
 export const orderStore = {
-  async create(buyerId, items, deliveryNotes = "") {
+  async create(buyerId, items, deliveryNotes = "", fulfillment = "pickup") {
     const current = ensureState();
     const productIds = items.map((item) => item.product_id);
     const selectedProducts = current.products.filter((product) =>
@@ -590,6 +721,16 @@ export const orderStore = {
       throw new Error("One or more products were not found");
     }
 
+    if (!approvedUser(buyerId)) fail("An approved buyer account is required.", 403);
+    const sellerIds = new Set();
+    for (const item of items) {
+      const product = selectedProducts.find((entry) => entry.id === item.product_id);
+      const stall = findStallById(product?.stall_id);
+      if (!product?.is_active || !publicStall(stall)) fail("A selected product is no longer available.", 409);
+      if (product.stock < item.quantity) fail(`Insufficient stock for ${product.name}.`, 409);
+      sellerIds.add(stall.owner_id);
+    }
+    if (sellerIds.size !== 1) fail("Place a separate order for each store.");
     const orderItems = [];
     const sellers = new Set();
     for (const item of items) {
@@ -608,6 +749,8 @@ export const orderStore = {
       if (stall) sellers.add(stall.owner_id);
       orderItems.push({
         product_id: product.id,
+        name: product.name,
+        image_url: product.image_url || null,
         quantity: item.quantity,
         unit_price: product.price,
       });
@@ -627,6 +770,7 @@ export const orderStore = {
       ),
       status: "pending",
       delivery_notes: deliveryNotes,
+      fulfillment,
       created_at: new Date().toISOString(),
       items: orderItems,
     };
@@ -641,7 +785,8 @@ export const orderStore = {
     return clone(
       current.orders
         .filter((order) => order.buyer_id === buyerId)
-        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .map(withOrderProductDetails),
     );
   },
 
@@ -654,7 +799,8 @@ export const orderStore = {
             order.seller_id === sellerId &&
             (!status || order.status === status),
         )
-        .sort((a, b) => b.created_at.localeCompare(a.created_at)),
+        .sort((a, b) => b.created_at.localeCompare(a.created_at))
+        .map(withOrderProductDetails),
     );
   },
 
@@ -671,7 +817,18 @@ export const orderStore = {
       error.status = 403;
       throw error;
     }
+    const transitions = { pending: ["confirmed", "cancelled"], confirmed: ["preparing", "ready", "cancelled"], preparing: ["ready"], ready: ["completed", "delivered"] };
+    const buyerCancellation = actorId === order.buyer_id && actorRole !== "admin";
+    if (buyerCancellation) {
+      if (status !== "cancelled") fail("Buyers can only cancel their orders.", 403);
+      if (!canBuyerCancel(order)) fail("You can cancel an unfinished order only within 10 minutes of placing it.", 409);
+    } else if (!(transitions[order.status] || []).includes(status)) fail("Invalid order status transition.");
+    if (status === "cancelled") for (const item of order.items) {
+      const product = findProductById(item.product_id);
+      if (product) product.stock += item.quantity;
+    }
     order.status = status;
+    if (status === "cancelled") order.cancelled_at = new Date().toISOString();
     saveState();
     return clone(order);
   },
@@ -695,7 +852,7 @@ export const messageStore = {
       if (!seen.has(partnerId)) {
         seen.add(partnerId);
         partners.push({
-          partner: findUserById(partnerId),
+          partner: publicUser(findUserById(partnerId)),
           last_message: clone(message),
         });
       }
@@ -721,6 +878,9 @@ export const messageStore = {
 
   async send(userId, receiverId, content, productId = null) {
     const current = ensureState();
+    if (!approvedUser(userId) || !approvedUser(receiverId)) fail("Messaging requires approved campus accounts.", 403);
+    const sender = findUserById(userId), receiver = findUserById(receiverId);
+    if (userId === receiverId || !["buyer", "seller"].every((role) => [sender.role, receiver.role].includes(role))) fail("Messages must be between a buyer and a seller.");
     const message = {
       id: randomUUID(),
       sender_id: userId,
@@ -739,25 +899,45 @@ export const messageStore = {
 export const eventStore = {
   async listEvents() {
     const current = ensureState();
+
     return clone(
-      current.events.slice().sort((a, b) => a.date.localeCompare(b.date)),
+      current.events
+        .slice()
+        .map((event) => ({
+          ...event,
+          stall_count: current.eventStalls.filter(
+            (entry) => String(entry.event_id) === String(event.id),
+          ).length,
+        }))
+        .sort((a, b) =>
+          String(a.date || "").localeCompare(String(b.date || "")),
+        ),
     );
   },
 
   async getById(eventId) {
     const current = ensureState();
-    const event = current.events.find((entry) => entry.id === eventId);
+
+    const event = current.events.find(
+      (entry) => String(entry.id) === String(eventId),
+    );
+
     if (!event) {
       const error = new Error("Event not found");
       error.status = 404;
       throw error;
     }
+
     return clone(event);
   },
 
   async listStallsForEvent(eventId) {
     const current = ensureState();
-    const event = current.events.find((entry) => entry.id === eventId);
+
+    const event = current.events.find(
+      (entry) => String(entry.id) === String(eventId),
+    );
+
     if (!event) {
       const error = new Error("Event not found");
       error.status = 404;
@@ -765,20 +945,32 @@ export const eventStore = {
     }
 
     const stalls = current.eventStalls
-      .filter((entry) => entry.event_id === eventId)
+      .filter((entry) => String(entry.event_id) === String(eventId))
       .map((entry) => {
-        const seller = entry.seller_id
-          ? current.stalls.find((s) => s.owner_id === entry.seller_id)
+        const sellerStall = entry.seller_id
+          ? current.stalls.find(
+              (stall) => String(stall.owner_id) === String(entry.seller_id),
+            )
           : null;
+
+        const seller = sellerStall
+          ? current.users.find(
+              (user) => String(user.id) === String(sellerStall.owner_id),
+            )
+          : null;
+
         return {
           ...entry,
-          sellerName: seller
-            ? current.users.find((u) => u.id === seller.owner_id)?.name || ""
-            : "",
-          productsAvailable: seller
+
+          sellerName: seller?.name || "",
+
+          productsAvailable: sellerStall
             ? current.products
-                .filter((p) => p.stall_id === seller.id)
-                .map((p) => p.name)
+                .filter(
+                  (product) =>
+                    String(product.stall_id) === String(sellerStall.id),
+                )
+                .map((product) => product.name)
             : [],
         };
       });
@@ -786,52 +978,208 @@ export const eventStore = {
     return clone(stalls);
   },
 
-  async submitApplication(sellerId, payload) {
+  async submitApplication(sellerId, payload = {}) {
     const current = ensureState();
-    const event = current.events.find((entry) => entry.id === payload.eventId);
+
+    const cleanText = (value) => String(value ?? "").trim();
+
+    const eventId = cleanText(payload.eventId);
+    const stallName = cleanText(payload.stallName);
+    const businessName = cleanText(payload.businessName);
+    const productCategory = cleanText(payload.productCategory);
+    const productList = cleanText(payload.productList);
+    const contactInfo = cleanText(payload.contactInfo);
+
+    const event = current.events.find(
+      (entry) => String(entry.id) === String(eventId),
+    );
+
     if (!event) {
       const error = new Error("Event not found");
       error.status = 404;
       throw error;
     }
 
+    if (
+      !stallName ||
+      !businessName ||
+      !productCategory ||
+      !productList ||
+      !contactInfo
+    ) {
+      const error = new Error(
+        "Please complete all required application fields",
+      );
+      error.status = 400;
+      throw error;
+    }
+
+    const stallSize = Number(payload.preferredStallSize);
+
+    const duration = Number(payload.duration);
+
+    if (!Number.isFinite(stallSize) || stallSize <= 0) {
+      const error = new Error("Preferred stall size must be greater than zero");
+      error.status = 400;
+      throw error;
+    }
+
+    if (!Number.isInteger(duration) || duration <= 0) {
+      const error = new Error("Duration must be a whole number of days");
+      error.status = 400;
+      throw error;
+    }
+
+    const activeStatuses = ["pending", "approved", "reserved"];
+
+    const duplicate = current.applications.find(
+      (entry) =>
+        String(entry.seller_id) === String(sellerId) &&
+        String(entry.event_id) === String(eventId) &&
+        activeStatuses.includes(String(entry.status).toLowerCase()),
+    );
+
+    if (duplicate) {
+      const error = new Error(
+        "You already have an active application for this event",
+      );
+      error.status = 409;
+      throw error;
+    }
+
     const application = {
       id: randomUUID(),
+
       seller_id: sellerId,
-      event_id: payload.eventId,
-      stall_name: payload.stallName,
-      business_name: payload.businessName,
-      product_category: payload.productCategory,
-      product_list: payload.productList,
-      preferred_stall_size: payload.preferredStallSize,
-      duration: payload.duration,
-      contact_info: payload.contactInfo,
+
+      event_id: eventId,
+
+      stall_name: stallName,
+
+      business_name: businessName,
+
+      product_category: productCategory,
+
+      product_list: productList,
+
+      preferred_stall_size: stallSize,
+
+      duration,
+
+      contact_info: contactInfo,
+
       status: "pending",
+
       created_at: new Date().toISOString(),
     };
 
     current.applications.push(application);
+
     saveState();
+
     return clone(application);
   },
 
-  async listApplications({ eventId, status } = {}) {
+  async listApplications({ eventId, status, sellerId } = {}) {
     const current = ensureState();
-    const items = current.applications.filter((entry) => {
-      const matchEvent = !eventId || entry.event_id === eventId;
-      const matchStatus = !status || entry.status === status;
-      return matchEvent && matchStatus;
+
+    const normalizedStatus = status ? String(status).toLowerCase() : "";
+
+    const applications = current.applications
+      .filter((entry) => {
+        const matchesEvent =
+          !eventId || String(entry.event_id) === String(eventId);
+
+        const matchesStatus =
+          !normalizedStatus ||
+          String(entry.status).toLowerCase() === normalizedStatus;
+
+        const matchesSeller =
+          !sellerId || String(entry.seller_id) === String(sellerId);
+
+        return matchesEvent && matchesStatus && matchesSeller;
+      })
+      .map((entry) => {
+        const event = current.events.find(
+          (item) => String(item.id) === String(entry.event_id),
+        );
+
+        return {
+          ...entry,
+
+          event: event
+            ? {
+                id: event.id,
+
+                name: event.name,
+
+                date: event.date,
+
+                end_date: event.end_date || null,
+
+                location: event.location || "",
+
+                description: event.description || "",
+              }
+            : null,
+        };
+      })
+      .sort((a, b) =>
+        String(b.created_at || "").localeCompare(String(a.created_at || "")),
+      );
+
+    return clone(applications);
+  },
+};
+
+export const posStore = {
+  async customers(query) {
+    if (!query || query.trim().length < 3) return [];
+    return ensureState().users.filter((user) => user.role === "buyer" && approvedUser(user.id) &&
+      (user.email.toLowerCase() === query.trim().toLowerCase() || user.campus_id?.toLowerCase() === query.trim().toLowerCase()))
+      .map(publicUser);
+  },
+  async list(sellerId) {
+    return clone(ensureState().posSales.filter((sale) => sale.seller_id === sellerId).sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  },
+  async create(sellerId, { request_id, buyer_id, items, cash_received }) {
+    const current = ensureState();
+    const prior = current.posSales.find((sale) => sale.request_id === request_id && sale.seller_id === sellerId);
+    if (prior) return clone(prior);
+    const stall = current.stalls.find((entry) => entry.owner_id === sellerId);
+    if (!publicStall(stall)) fail("Open an approved stall before recording a sale.", 403);
+    const buyer = findUserById(buyer_id);
+    if (buyer?.role !== "buyer" || !approvedUser(buyer_id)) fail("Choose an approved CSUCC buyer.", 403);
+    const unique = new Set(items.map((item) => item.product_id));
+    if (unique.size !== items.length) fail("Duplicate product lines are not allowed.");
+    const lines = items.map((item) => {
+      const product = findProductById(item.product_id);
+      if (!product || product.stall_id !== stall.id || !product.is_active) fail("Choose an active product from your own stall.", 403);
+      if (product.stock < item.quantity) fail(`Insufficient stock for ${product.name}.`, 409);
+      return { product_id: product.id, name: product.name, quantity: item.quantity, unit_price: product.price };
     });
-    return clone(items);
+    const totalCents = lines.reduce((sum, line) => sum + Math.round(line.unit_price * 100) * line.quantity, 0);
+    const cashCents = Math.round(cash_received * 100);
+    if (cashCents < totalCents) fail("Cash received is less than the sale total.");
+    // Validate every line before changing any stock. This store uses a single process.
+    for (const line of lines) findProductById(line.product_id).stock -= line.quantity;
+    const sale = { id: randomUUID(), request_id, seller_id: sellerId, buyer_id, buyer_name: buyer.name,
+      stall_id: stall.id, stall_name: stall.name, items: lines, total: totalCents / 100,
+      cash_received: cashCents / 100, change: (cashCents - totalCents) / 100,
+      status: "completed", source: "pos", created_at: new Date().toISOString() };
+    current.posSales.push(sale);
+    audit(sellerId, "pos.sale", sale.id, "Cash sale recorded");
+    saveState();
+    return clone(sale);
   },
 };
 
 export const analyticsStore = {
-  async salesSummary(userId, role) {
+  async salesSummary(userId, role, period = 30) {
     const current = ensureState();
-    const orders = current.orders.filter((order) => {
+    const orders = [...current.orders, ...current.posSales].filter((order) => {
       const scoped = role === "admin" ? true : order.seller_id === userId;
-      return scoped && order.status !== "cancelled";
+      return scoped && ["completed", "delivered"].includes(order.status) && inPeriod(order.created_at, period);
     });
 
     const timeline = {};
@@ -859,10 +1207,10 @@ export const analyticsStore = {
     };
   },
 
-  async topProducts(userId, role) {
+  async topProducts(userId, role, period = 30) {
     const current = ensureState();
-    const scopedOrders = current.orders.filter((entry) =>
-      role === "admin" ? true : entry.seller_id === userId,
+    const scopedOrders = [...current.orders, ...current.posSales].filter((entry) =>
+      (role === "admin" || entry.seller_id === userId) && ["completed", "delivered"].includes(entry.status) && inPeriod(entry.created_at, period),
     );
 
     const map = {};
@@ -893,10 +1241,10 @@ export const analyticsStore = {
       }));
   },
 
-  async categoryBreakdown(userId, role) {
+  async categoryBreakdown(userId, role, period = 30) {
     const current = ensureState();
-    const scopedOrders = current.orders.filter((entry) =>
-      role === "admin" ? true : entry.seller_id === userId,
+    const scopedOrders = [...current.orders, ...current.posSales].filter((entry) =>
+      (role === "admin" || entry.seller_id === userId) && ["completed", "delivered"].includes(entry.status) && inPeriod(entry.created_at, period),
     );
 
     const map = {};

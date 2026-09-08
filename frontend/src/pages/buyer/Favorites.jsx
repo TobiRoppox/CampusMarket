@@ -1,78 +1,144 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Heart } from "lucide-react";
+import { ArrowRight, Heart, Search, Sparkles } from "lucide-react";
 import Navbar from "../../components/common/Navbar.jsx";
 import ProductCard from "../../components/common/ProductCard.jsx";
-import { SkeletonGrid } from "../../components/common/UI.jsx";
+import { SkeletonGrid } from "../../components/common/Ui.jsx";
 import { useAuth } from "../../context/AuthContext.jsx";
-// TODO: swap for the real service once it exists, e.g.:
-// import favoriteService from "../../services/favoriteService.js";
+import favoriteService from "../../services/favoriteService.js";
 
 export default function Favorites() {
   const { user } = useAuth();
   const [favorites, setFavorites] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!user) return;
-    setLoading(true);
-    // TODO: replace with favoriteService.getAll(user.id)
-    const timer = setTimeout(() => {
-      setFavorites([]); // no favorites yet — backend not built
+    if (!user?.id) {
+      setFavorites([]);
       setLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [user]);
+      return undefined;
+    }
 
-  const handleRemove = (productId) => {
-    // TODO: favoriteService.remove(productId)
-    setFavorites((prev) => prev.filter((p) => p.id !== productId));
-  };
+    let active = true;
+    setLoading(true);
+    setError("");
+
+    favoriteService
+      .getAll(user.id)
+      .then((savedProducts) => {
+        if (active) setFavorites(savedProducts);
+      })
+      .catch(() => {
+        if (active) setError("We could not load your saved products.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    const unsubscribe = favoriteService.subscribe(user.id, (savedProducts) => {
+      if (active) setFavorites(savedProducts);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [user?.id]);
 
   return (
-    <div>
+    <div className="favorites-shell">
       <Navbar />
-      <div className="favorites-page">
-        <h1>Favorites</h1>
-        <p className="favorites-sub">Products you've saved for later</p>
+
+      <main className="favorites-page">
+        <header className="favorites-header">
+          <div className="favorites-heading-copy">
+            <span className="favorites-heading-icon" aria-hidden="true">
+              <Heart />
+            </span>
+            <div>
+              <span className="favorites-eyebrow">Your collection</span>
+              <h1>Saved favorites</h1>
+              <p>Keep the campus finds you love in one convenient place.</p>
+            </div>
+          </div>
+
+          {!loading && favorites.length > 0 && (
+            <div className="favorites-count">
+              <strong>{favorites.length}</strong>
+              <span>
+                {favorites.length === 1 ? "saved product" : "saved products"}
+              </span>
+            </div>
+          )}
+        </header>
 
         {loading ? (
-          <SkeletonGrid count={8} />
+          <section className="favorites-loading" aria-label="Loading favorites">
+            <SkeletonGrid count={8} />
+          </section>
+        ) : error ? (
+          <section
+            className="favorites-state-card favorites-error"
+            role="alert"
+          >
+            <span>
+              <Heart />
+            </span>
+            <h2>Favorites unavailable</h2>
+            <p>{error}</p>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => window.location.reload()}
+            >
+              Try again
+            </button>
+          </section>
         ) : favorites.length === 0 ? (
-          <div className="favorites-empty">
-            <Heart size={40} className="favorites-empty-icon" />
-            <h3>No favorites yet</h3>
-            <p>Tap the heart icon on any product to save it here.</p>
-            <Link to="/browse" className="btn btn-primary">
-              Browse Products
+          <section className="favorites-state-card favorites-empty">
+            <div className="favorites-empty-art" aria-hidden="true">
+              <span>
+                <Heart />
+              </span>
+              <i>
+                <Sparkles />
+              </i>
+            </div>
+            <span className="favorites-eyebrow">Start your collection</span>
+            <h2>No favorites yet</h2>
+            <p>
+              Tap the heart on any product to save it here. Your favorites stay
+              available on this device while the backend feature is being
+              prepared.
+            </p>
+            <Link to="/browse" className="btn btn-primary btn-lg">
+              Explore products <ArrowRight size={17} aria-hidden="true" />
             </Link>
-          </div>
+            <small>
+              <Search size={13} /> Browse by category, stall, or product name
+            </small>
+          </section>
         ) : (
-          <div className="product-grid fade-in">
-            {favorites.map((p) => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                onRemoveFavorite={() => handleRemove(p.id)}
-              />
-            ))}
-          </div>
+          <section aria-labelledby="favorites-grid-heading">
+            <div className="favorites-section-heading">
+              <div>
+                <span className="favorites-eyebrow">Saved for later</span>
+                <h2 id="favorites-grid-heading">Products you liked</h2>
+              </div>
+              <Link to="/browse">
+                Discover more <ArrowRight size={14} />
+              </Link>
+            </div>
+
+            <div className="product-grid favorites-product-grid fade-in">
+              {favorites.map((product) => (
+                <ProductCard key={product.id} product={product} />
+              ))}
+            </div>
+          </section>
         )}
-      </div>
-
-      <style>{`
-        .favorites-page { max-width: 1400px; margin: 0 auto; padding: 1.75rem 1.5rem 4rem; }
-        .favorites-page h1 { font-size: 1.5rem; font-weight: 800; color: var(--gray-900); }
-        .favorites-sub { color: var(--gray-500); font-size: 0.9rem; margin-bottom: 1.5rem; }
-
-        .favorites-empty {
-          display: flex; flex-direction: column; align-items: center; text-align: center;
-          padding: 4rem 1.5rem; border: 1px dashed var(--gray-200); border-radius: var(--radius-xl);
-        }
-        .favorites-empty-icon { color: var(--gray-300); margin-bottom: 1rem; }
-        .favorites-empty h3 { font-size: 1.1rem; font-weight: 700; color: var(--gray-800); margin-bottom: 0.25rem; }
-        .favorites-empty p { color: var(--gray-500); font-size: 0.9rem; margin-bottom: 1.25rem; }
-      `}</style>
+      </main>
     </div>
   );
 }

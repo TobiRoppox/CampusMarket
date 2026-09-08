@@ -6,6 +6,7 @@ export const getSalesAnalytics = async (req, res, next) => {
     const summary = await analyticsStore.salesSummary(
       req.user.id,
       req.user.role,
+      req.query.period,
     );
     res.json(summary);
   } catch (err) {
@@ -16,7 +17,7 @@ export const getSalesAnalytics = async (req, res, next) => {
 // GET /api/analytics/products/top
 export const getTopProducts = async (req, res, next) => {
   try {
-    const top = await analyticsStore.topProducts(req.user.id, req.user.role);
+    const top = await analyticsStore.topProducts(req.user.id, req.user.role, req.query.period);
     res.json(top);
   } catch (err) {
     next(err);
@@ -29,6 +30,7 @@ export const getCategoryBreakdown = async (req, res, next) => {
     const breakdown = await analyticsStore.categoryBreakdown(
       req.user.id,
       req.user.role,
+      req.query.period,
     );
     res.json(breakdown);
   } catch (err) {

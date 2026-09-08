@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar.jsx";
-import { StatCard } from "../../components/common/UI.jsx";
+import { StatCard } from "../../components/common/Ui.jsx";
 import { adminService, stallService } from "../../services/api.js";
 import toast from "react-hot-toast";
 import {

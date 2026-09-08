@@ -12,7 +12,7 @@ export default function Register() {
     email: "",
     password: "",
     confirmPassword: "",
-    role: "",
+    role: "", campus_id: "", affiliation: "student", department: "", store_name: "", campus_location: "",
   });
   const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState("");
@@ -35,11 +35,15 @@ export default function Register() {
         name: form.name,
         email: form.email,
         password: form.password,
-        role: form.role,
+        role: form.role, campus_id: form.campus_id, affiliation: form.affiliation, department: form.department,
+        store_name: form.store_name, campus_location: form.campus_location,
       });
-      navigate("/verify-email");
-    } catch {
-      setError("Registration failed. Please try again.");
+      navigate("/account-status");
+    } catch (err) {
+      console.error("Registration error:", err);
+      setError(
+        err.response?.data?.details?.map((detail) => detail.message).join(" ") || err.response?.data?.error || "Registration failed. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -48,7 +52,7 @@ export default function Register() {
   return (
     <AuthLayout
       title="Create Your Account"
-      subtitle="Join Campus Market today!"
+      subtitle="For students, faculty, and employees of CSUCC."
     >
       {error && (
         <div className="auth-error" role="alert">
@@ -100,7 +104,8 @@ export default function Register() {
               id="reg-password"
               type={showPass ? "text" : "password"}
               className="form-input"
-              placeholder="Create a password"
+              placeholder="At least 8 characters"
+              minLength={8}
               value={form.password}
               required
               onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -152,6 +157,27 @@ export default function Register() {
             <option value="seller">Seller</option>
           </select>
         </div>
+        <fieldset style={{ border: "1px solid #dce8df", borderRadius: 12, padding: "1rem", display: "grid", gap: "1rem" }}>
+          <legend style={{ fontSize: ".9rem", fontWeight: 700 }}>CSUCC verification</legend>
+          <label className="form-label">Campus affiliation
+            <select className="form-input" value={form.affiliation} onChange={(e) => setForm({ ...form, affiliation: e.target.value })}>
+              <option value="student">Student</option><option value="faculty">Faculty</option><option value="employee">Employee</option>
+            </select>
+          </label>
+          <label className="form-label">Student / employee ID number
+            <input className="form-input" required minLength={3} maxLength={50} value={form.campus_id} onChange={(e) => setForm({ ...form, campus_id: e.target.value })} />
+          </label>
+          <label className="form-label">College, program, or office
+            <input className="form-input" required minLength={2} maxLength={120} value={form.department} onChange={(e) => setForm({ ...form, department: e.target.value })} />
+          </label>
+          <p className="text-sm text-muted">An administrator will check your ID number against CSUCC records. Your ID is visible only to you and administrators. Buying and selling become available after approval.</p>
+        </fieldset>
+        {form.role === "seller" && <fieldset style={{ border: "1px solid #dce8df", borderRadius: 12, padding: "1rem", display: "grid", gap: "1rem" }}>
+          <legend style={{ fontSize: ".9rem", fontWeight: 700 }}>Your campus store</legend>
+          <label className="form-label">Store name<input className="form-input" required minLength={2} maxLength={100} value={form.store_name} onChange={(e) => setForm({ ...form, store_name: e.target.value })} /></label>
+          <label className="form-label">CSUCC location / stall<input className="form-input" required minLength={2} maxLength={150} placeholder="e.g. Main Canteen, Stall 4" value={form.campus_location} onChange={(e) => setForm({ ...form, campus_location: e.target.value })} /></label>
+          <p className="text-sm text-muted">Your store starts on the Free plan and becomes public after store approval.</p>
+        </fieldset>}
         <button
           type="submit"
           className="btn btn-primary btn-lg"

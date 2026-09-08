@@ -1,14 +1,19 @@
-import { stallStore } from "../data/marketStore.js";
+import { stallStore, authStore } from "../data/marketStore.js";
 
 export const getStalls = async (req, res, next) => {
   try {
     const { q, status, active } = req.query;
     const stalls = await stallStore.listStalls({
       q,
-      status,
-      activeOnly: active === "true",
+      status: "approved",
+      activeOnly: true,
     });
-    res.json(stalls);
+    const visible = [];
+    for (const stall of stalls) {
+      const owner = await authStore.getUserById(stall.owner_id);
+      if (owner.status === "approved" && !owner.is_banned) visible.push(stall);
+    }
+    res.json(visible);
   } catch (err) {
     next(err);
   }
@@ -17,6 +22,8 @@ export const getStalls = async (req, res, next) => {
 export const getStall = async (req, res, next) => {
   try {
     const stall = await stallStore.getById(req.params.id);
+    const owner = await authStore.getUserById(stall.owner_id);
+    if (stall.status !== "approved" || !stall.is_active || owner.status !== "approved" || owner.is_banned) return res.status(404).json({ error: "Stall not found" });
     res.json(stall);
   } catch (err) {
     next(err);

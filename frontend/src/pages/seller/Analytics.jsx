@@ -1,29 +1,32 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "../../components/common/Sidebar.jsx";
-import { StatCard } from "../../components/common/UI.jsx";
 import { analyticsService } from "../../services/api.js";
 import {
-  FiDollarSign,
-  FiShoppingBag,
-  FiTrendingUp,
+  FiAlertCircle,
   FiBarChart2,
+  FiDollarSign,
+  FiPackage,
+  FiRefreshCw,
+  FiShoppingBag,
+  FiStar,
+  FiTrendingUp,
 } from "react-icons/fi";
 import {
-  LineChart,
-  Line,
-  BarChart,
   Bar,
-  PieChart,
-  Pie,
+  BarChart,
+  CartesianGrid,
   Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
 } from "recharts";
 import { format } from "date-fns";
+import "./Analytics.css";
 
 const PERIOD_OPTIONS = [
   { label: "7 days", value: "7" },
@@ -31,402 +34,660 @@ const PERIOD_OPTIONS = [
   { label: "90 days", value: "90" },
 ];
 
-// Matches your --cm-* palette (gold accent, green primary/secondary) plus
-// a few extra hues for categories beyond those two
-const PIE_COLORS = [
-  "#F4C430", // cm-accent (gold)
-  "#0F7B3E", // cm-primary (green)
-  "#3B82F6", // cm-info
-  "#EF4444", // cm-danger
-  "#9333EA",
-  "#64748B", // gray-500
+const CHART_COLORS = [
+  "#0f7b3e",
+  "#f0bd27",
+  "#3b82f6",
+  "#e86747",
+  "#8b5cf6",
+  "#64748b",
 ];
+
+const extractObject = (payload, key) =>
+  payload?.data?.[key] || payload?.[key] || payload?.data || payload || {};
+
+const extractArray = (payload, key) => {
+  const value =
+    payload?.data?.[key] ?? payload?.[key] ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value : [];
+};
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
+
+const formatCompactCurrency = (value) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Number(value) || 0);
+
+const formatChartDate = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : format(date, "MMM d");
+};
+
+const titleCase = (value) =>
+  String(value || "Other")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const normalizeTopProduct = (record, index) => {
+  const product = record?.product || record?.products || {};
+  return {
+    id: record?.product_id || product.id || record?.id || `product-${index}`,
+    name:
+      product.name ||
+      record?.product_name ||
+      record?.name ||
+      "Untitled product",
+    category: product.category || record?.category || "other",
+    sold:
+      Number(
+        record?.total_sold ?? record?.sold_count ?? record?.quantity_sold ?? 0,
+      ) || 0,
+    revenue: Number(record?.revenue ?? record?.total_revenue ?? 0) || 0,
+  };
+};
+
+const normalizeCategory = (record, index) => ({
+  id: record?.category || record?.name || `category-${index}`,
+  name: titleCase(record?.category || record?.name),
+  revenue:
+    Number(record?.revenue ?? record?.total_revenue ?? record?.value ?? 0) || 0,
+  orders: Number(record?.orders ?? record?.order_count ?? 0) || 0,
+});
+
+function AnalyticsMetric({
+  icon,
+  label,
+  value,
+  note,
+  tone = "green",
+  loading,
+}) {
+  return (
+    <article className={`analytics-metric tone-${tone}`}>
+      <span>{icon}</span>
+      <div>
+        <small>{label}</small>
+        {loading ? (
+          <i className="analytics-shimmer" />
+        ) : (
+          <strong>{value}</strong>
+        )}
+        <p>{note}</p>
+      </div>
+    </article>
+  );
+}
+
+function ChartEmpty({ icon, title, description }) {
+  return (
+    <div className="analytics-chart-empty">
+      {icon}
+      <strong>{title}</strong>
+      <p>{description}</p>
+    </div>
+  );
+}
 
 export default function Analytics() {
   const [period, setPeriod] = useState("30");
-  const [sales, setSales] = useState(null);
+  const [sales, setSales] = useState({});
   const [topProducts, setTopProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [premiumRequired, setPremiumRequired] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const requestSequence = useRef(0);
+
+  const loadAnalytics = useCallback(
+    async ({ quiet = false } = {}) => {
+      const requestId = ++requestSequence.current;
+      quiet ? setRefreshing(true) : setLoading(true);
+      setError("");
+
+      const results = await Promise.allSettled([
+        analyticsService.getSales(Number(period)),
+        analyticsService.getTopProducts(Number(period)),
+        analyticsService.getCategories(Number(period)),
+      ]);
+
+      if (requestId !== requestSequence.current) return;
+
+      const [salesResult, productsResult, categoriesResult] = results;
+      setPremiumRequired(results.some((result) => result.status === "rejected" && result.reason.response?.data?.code === "PREMIUM_REQUIRED"));
+      const failedCount = results.filter(
+        (result) => result.status === "rejected",
+      ).length;
+
+      if (salesResult.status === "fulfilled") {
+        setSales(extractObject(salesResult.value.data, "sales"));
+      }
+      if (productsResult.status === "fulfilled") {
+        setTopProducts(
+          extractArray(productsResult.value.data, "products").map(
+            normalizeTopProduct,
+          ),
+        );
+      }
+      if (categoriesResult.status === "fulfilled") {
+        setCategories(
+          extractArray(categoriesResult.value.data, "categories").map(
+            normalizeCategory,
+          ),
+        );
+      }
+
+      if (failedCount > 0) {
+        setError(
+          failedCount === results.length
+            ? "Analytics are temporarily unavailable. Please try again."
+            : "Some analytics could not be updated. Available sections are still shown.",
+        );
+      } else {
+        setLastUpdated(new Date());
+      }
+
+      setLoading(false);
+      setRefreshing(false);
+    },
+    [period],
+  );
 
   useEffect(() => {
-    setLoading(true);
-    Promise.all([
-      analyticsService.getSales(period),
-      analyticsService.getTopProducts(),
-      analyticsService.getCategories(),
-    ])
-      .then(([s, t, c]) => {
-        setSales(s.data);
-        setTopProducts(t.data || []);
-        setCategories(c.data || []);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [period]);
+    loadAnalytics();
+  }, [loadAnalytics]);
 
-  const fmt = (p) =>
-    `₱${Number(p).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+  const timeline = useMemo(
+    () =>
+      (Array.isArray(sales?.timeline) ? sales.timeline : [])
+        .map((entry) => ({
+          date: formatChartDate(entry?.date || entry?.day || entry?.created_at),
+          Revenue: Number(entry?.revenue ?? entry?.total_revenue ?? 0) || 0,
+          Orders: Number(entry?.orders ?? entry?.order_count ?? 0) || 0,
+        }))
+        .filter((entry) => entry.date),
+    [sales],
+  );
 
-  const chartTimeline = (sales?.timeline || []).map((d) => ({
-    date: format(new Date(d.date), "MMM d"),
-    Revenue: d.revenue,
-    Orders: d.orders,
-  }));
+  const productChart = useMemo(
+    () =>
+      topProducts.slice(0, 8).map((product) => ({
+        name:
+          product.name.length > 17
+            ? `${product.name.slice(0, 17)}…`
+            : product.name,
+        Sold: product.sold,
+      })),
+    [topProducts],
+  );
 
-  const topProductsChart = topProducts.slice(0, 8).map((p) => ({
-    name:
-      p.product?.name?.slice(0, 16) + (p.product?.name?.length > 16 ? "…" : ""),
-    Sold: p.total_sold,
-    Revenue: p.revenue,
-  }));
+  const categoryChart = useMemo(
+    () => categories.filter((category) => category.revenue > 0),
+    [categories],
+  );
 
-  const pieData = categories.map((c) => ({
-    name:
-      c.category.charAt(0).toUpperCase() +
-      c.category.slice(1).replace("-", " "),
-    value: c.revenue,
-  }));
+  const categoryRevenue = categoryChart.reduce(
+    (sum, category) => sum + category.revenue,
+    0,
+  );
+  const totalRevenue =
+    Number(sales?.total_revenue) ||
+    timeline.reduce((sum, item) => sum + item.Revenue, 0);
+  const totalOrders =
+    Number(sales?.total_orders) ||
+    timeline.reduce((sum, item) => sum + item.Orders, 0);
+  const averageOrder =
+    Number(sales?.avg_order_value) ||
+    (totalOrders > 0 ? totalRevenue / totalOrders : 0);
+  const bestProduct = topProducts[0];
+  const bestCategory = [...categoryChart].sort(
+    (a, b) => b.revenue - a.revenue,
+  )[0];
+  const selectedPeriod =
+    PERIOD_OPTIONS.find((option) => option.value === period)?.label ||
+    `${period} days`;
+
+  if (premiumRequired) return <div className="dashboard-layout"><Sidebar /><main className="dashboard-main"><div className="dashboard-content"><section className="card" style={{ padding: "2rem" }}><h1>Product analytics with Premium</h1><p>Understand sales, popular products, and category performance. Premium also includes more listings and landing-page advertising.</p><p>Contact the campus administrator to request a plan change. Your Free plan includes the point of sale and sales receipts.</p><a href="/seller/pos" className="btn btn-primary">Open point of sale</a></section></div></main></div>;
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout seller-analytics-shell">
       <Sidebar />
+
       <main className="dashboard-main">
-        <div className="topbar">
+        <header className="topbar seller-analytics-topbar">
           <div className="topbar-left">
             <div className="topbar-titles">
               <h1>Analytics</h1>
-              <p>Track your stall's performance and sales trends.</p>
+              <p>Understand sales trends and product performance.</p>
             </div>
           </div>
-          <div className="topbar-right">
-            <div className="period-toggle">
-              {PERIOD_OPTIONS.map((opt) => (
+
+          <div className="seller-analytics-topbar-actions">
+            <div
+              className="analytics-period-toggle"
+              aria-label="Analytics period"
+            >
+              {PERIOD_OPTIONS.map((option) => (
                 <button
-                  key={opt.value}
-                  className={`period-btn ${period === opt.value ? "active" : ""}`}
-                  onClick={() => setPeriod(opt.value)}
+                  type="button"
+                  key={option.value}
+                  className={period === option.value ? "active" : ""}
+                  onClick={() => setPeriod(option.value)}
+                  aria-pressed={period === option.value}
                 >
-                  {opt.label}
+                  {option.label}
                 </button>
               ))}
             </div>
+            <button
+              type="button"
+              className="analytics-refresh-button"
+              onClick={() => loadAnalytics({ quiet: true })}
+              disabled={loading || refreshing}
+              aria-label="Refresh analytics"
+            >
+              <FiRefreshCw className={refreshing ? "is-spinning" : ""} />
+            </button>
           </div>
-        </div>
+        </header>
 
-        <div className="dashboard-content">
-          {/* KPI stats */}
-          <div className="stats-grid" style={{ marginBottom: "1.5rem" }}>
-            <StatCard
-              label="Total Revenue"
-              value={loading ? "—" : fmt(sales?.total_revenue || 0)}
-              icon={<FiDollarSign />}
-              color="gold"
-            />
-            <StatCard
-              label="Total Orders"
-              value={loading ? "—" : sales?.total_orders || 0}
-              icon={<FiShoppingBag />}
-              color="green"
-            />
-            <StatCard
-              label="Avg Order Value"
-              value={loading ? "—" : fmt(sales?.avg_order_value || 0)}
-              icon={<FiTrendingUp />}
-              color="info"
-            />
-            <StatCard
-              label="Product Categories"
-              value={loading ? "—" : categories.length}
-              icon={<FiBarChart2 />}
-              color="gray"
-            />
-          </div>
-
-          {/* Revenue over time */}
-          <div className="card chart-card" style={{ marginBottom: "1.5rem" }}>
-            <div className="chart-card-header">
-              <h2 className="card-title">Revenue Over Time</h2>
+        <div className="dashboard-content seller-analytics-content">
+          {error && (
+            <div className="analytics-error" role="alert">
+              <FiAlertCircle />
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => loadAnalytics({ quiet: true })}
+              >
+                Retry
+              </button>
             </div>
-            <div style={{ height: 300, padding: "0 1.25rem 1.25rem" }}>
+          )}
+
+          <section className="analytics-overview">
+            <div>
+              <span>Performance overview</span>
+              <h2>Your stall at a glance</h2>
+              <p>
+                Showing sales activity and product performance for the last{" "}
+                {selectedPeriod}.
+              </p>
+            </div>
+            <div className="analytics-overview-highlights">
+              <div>
+                <FiStar />
+                <span>
+                  <small>Top product</small>
+                  <strong>{bestProduct?.name || "No sales yet"}</strong>
+                </span>
+              </div>
+              <div>
+                <FiBarChart2 />
+                <span>
+                  <small>Top category</small>
+                  <strong>{bestCategory?.name || "No category data"}</strong>
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section
+            className="analytics-metrics-grid"
+            aria-label="Analytics summary"
+          >
+            <AnalyticsMetric
+              icon={<FiDollarSign />}
+              label="Total revenue"
+              value={formatCurrency(totalRevenue)}
+              note={`Last ${selectedPeriod}`}
+              tone="gold"
+              loading={loading}
+            />
+            <AnalyticsMetric
+              icon={<FiShoppingBag />}
+              label="Total orders"
+              value={totalOrders}
+              note="Orders received"
+              loading={loading}
+            />
+            <AnalyticsMetric
+              icon={<FiTrendingUp />}
+              label="Average order"
+              value={formatCurrency(averageOrder)}
+              note="Revenue per order"
+              tone="blue"
+              loading={loading}
+            />
+            <AnalyticsMetric
+              icon={<FiBarChart2 />}
+              label="Categories sold"
+              value={categories.length}
+              note="Product categories"
+              tone="purple"
+              loading={loading}
+            />
+          </section>
+
+          <section className="analytics-panel analytics-revenue-panel">
+            <div className="analytics-panel-header">
+              <div>
+                <span>Sales trend</span>
+                <h2>Revenue and orders over time</h2>
+              </div>
+              <div className="analytics-chart-key">
+                <span>
+                  <i className="revenue" /> Revenue
+                </span>
+                <span>
+                  <i className="orders" /> Orders
+                </span>
+              </div>
+            </div>
+            <div className="analytics-wide-chart">
               {loading ? (
-                <div
-                  className="skeleton"
-                  style={{ height: "100%", borderRadius: 8 }}
+                <div className="analytics-chart-skeleton analytics-shimmer" />
+              ) : timeline.length === 0 ? (
+                <ChartEmpty
+                  icon={<FiTrendingUp />}
+                  title="No activity for this period"
+                  description="Revenue and order trends will appear after buyers complete purchases."
                 />
-              ) : chartTimeline.length === 0 ? (
-                <div className="empty-state" style={{ height: "100%" }}>
-                  <p>No data for this period</p>
-                </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart
-                    data={chartTimeline}
-                    margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                    data={timeline}
+                    margin={{ top: 8, right: 12, left: -8, bottom: 0 }}
                   >
                     <CartesianGrid
+                      vertical={false}
                       strokeDasharray="3 3"
-                      stroke="var(--gray-200)"
+                      stroke="#e8eeea"
                     />
                     <XAxis
                       dataKey="date"
-                      tick={{ fontSize: 11, fill: "var(--gray-500)" }}
+                      tick={{ fontSize: 10, fill: "#7d8d83" }}
                       tickLine={false}
+                      axisLine={false}
+                      minTickGap={18}
                     />
                     <YAxis
                       yAxisId="revenue"
-                      tick={{ fontSize: 11, fill: "var(--gray-500)" }}
+                      tick={{ fontSize: 10, fill: "#7d8d83" }}
                       tickLine={false}
                       axisLine={false}
-                      tickFormatter={(v) => `₱${v}`}
+                      tickFormatter={formatCompactCurrency}
                     />
                     <YAxis
                       yAxisId="orders"
                       orientation="right"
-                      tick={{ fontSize: 11, fill: "var(--gray-500)" }}
+                      allowDecimals={false}
+                      tick={{ fontSize: 10, fill: "#7d8d83" }}
                       tickLine={false}
                       axisLine={false}
                     />
                     <Tooltip
                       contentStyle={{
-                        borderRadius: 10,
-                        border: "1px solid var(--gray-200)",
-                        fontSize: 13,
+                        borderRadius: 12,
+                        border: "1px solid #e1e8e4",
+                        boxShadow: "0 10px 28px rgba(15,52,34,.1)",
+                        fontSize: 12,
                       }}
-                      formatter={(v, name) => [
-                        name === "Revenue" ? `₱${v.toLocaleString()}` : v,
+                      formatter={(value, name) => [
+                        name === "Revenue" ? formatCurrency(value) : value,
                         name,
                       ]}
                     />
-                    <Legend wrapperStyle={{ fontSize: 13 }} />
                     <Line
                       yAxisId="revenue"
                       type="monotone"
                       dataKey="Revenue"
-                      stroke="var(--cm-accent)"
+                      stroke="#0f7b3e"
                       strokeWidth={2.5}
                       dot={false}
-                      activeDot={{ r: 5 }}
+                      activeDot={{
+                        r: 4,
+                        fill: "#0f7b3e",
+                        stroke: "#fff",
+                        strokeWidth: 2,
+                      }}
                     />
                     <Line
                       yAxisId="orders"
                       type="monotone"
                       dataKey="Orders"
-                      stroke="var(--cm-primary)"
+                      stroke="#e5aa08"
                       strokeWidth={2}
+                      strokeDasharray="5 4"
                       dot={false}
-                      activeDot={{ r: 4 }}
-                      strokeDasharray="5 3"
+                      activeDot={{ r: 3 }}
                     />
                   </LineChart>
                 </ResponsiveContainer>
               )}
             </div>
-          </div>
+          </section>
 
-          {/* Top products + Category breakdown */}
-          <div className="analytics-grid">
-            {/* Top products bar chart */}
-            <div className="card chart-card">
-              <div className="chart-card-header">
-                <h2 className="card-title">Top Products by Units Sold</h2>
+          <section className="analytics-lower-grid">
+            <article className="analytics-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span>Product ranking</span>
+                  <h2>Top products by units sold</h2>
+                </div>
               </div>
-              <div style={{ height: 280, padding: "0 1.25rem 1.25rem" }}>
+              <div className="analytics-small-chart">
                 {loading ? (
-                  <div
-                    className="skeleton"
-                    style={{ height: "100%", borderRadius: 8 }}
+                  <div className="analytics-chart-skeleton analytics-shimmer" />
+                ) : productChart.length === 0 ? (
+                  <ChartEmpty
+                    icon={<FiPackage />}
+                    title="No product sales yet"
+                    description="Your best-selling products will appear here."
                   />
-                ) : topProductsChart.length === 0 ? (
-                  <div className="empty-state" style={{ height: "100%" }}>
-                    <p>No sales yet</p>
-                  </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
-                      data={topProductsChart}
+                      data={productChart}
                       layout="vertical"
-                      margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                      margin={{ top: 5, right: 15, left: 5, bottom: 0 }}
                     >
                       <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="var(--gray-200)"
                         horizontal={false}
+                        strokeDasharray="3 3"
+                        stroke="#e8eeea"
                       />
                       <XAxis
                         type="number"
-                        tick={{ fontSize: 11, fill: "var(--gray-500)" }}
+                        allowDecimals={false}
+                        tick={{ fontSize: 10, fill: "#7d8d83" }}
                         tickLine={false}
+                        axisLine={false}
                       />
                       <YAxis
                         type="category"
                         dataKey="name"
-                        tick={{ fontSize: 11, fill: "var(--gray-600)" }}
-                        width={90}
+                        width={108}
+                        tick={{ fontSize: 10, fill: "#596b60" }}
                         tickLine={false}
+                        axisLine={false}
                       />
                       <Tooltip
                         contentStyle={{
-                          borderRadius: 10,
-                          border: "1px solid var(--gray-200)",
-                          fontSize: 13,
+                          borderRadius: 12,
+                          border: "1px solid #e1e8e4",
+                          fontSize: 12,
                         }}
                       />
                       <Bar
                         dataKey="Sold"
-                        fill="var(--cm-accent)"
-                        radius={[0, 4, 4, 0]}
+                        fill="#0f7b3e"
+                        radius={[0, 5, 5, 0]}
+                        maxBarSize={18}
                       />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
               </div>
-            </div>
+            </article>
 
-            {/* Category pie chart */}
-            <div className="card chart-card">
-              <div className="chart-card-header">
-                <h2 className="card-title">Revenue by Category</h2>
+            <article className="analytics-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span>Revenue mix</span>
+                  <h2>Revenue by category</h2>
+                </div>
               </div>
-              <div style={{ height: 280, padding: "0 1.25rem 1.25rem" }}>
-                {loading ? (
-                  <div
-                    className="skeleton"
-                    style={{ height: "100%", borderRadius: 8 }}
+              {loading ? (
+                <div className="analytics-category-loading analytics-shimmer" />
+              ) : categoryChart.length === 0 ? (
+                <div className="analytics-small-chart">
+                  <ChartEmpty
+                    icon={<FiBarChart2 />}
+                    title="No category revenue yet"
+                    description="Category contribution appears after products are sold."
                   />
-                ) : pieData.length === 0 ? (
-                  <div className="empty-state" style={{ height: "100%" }}>
-                    <p>No data yet</p>
+                </div>
+              ) : (
+                <div className="analytics-category-layout">
+                  <div className="analytics-pie-chart">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={categoryChart}
+                          dataKey="revenue"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={48}
+                          outerRadius={75}
+                          paddingAngle={3}
+                          stroke="none"
+                        >
+                          {categoryChart.map((category, index) => (
+                            <Cell
+                              key={category.id}
+                              fill={CHART_COLORS[index % CHART_COLORS.length]}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value) => [
+                            formatCurrency(value),
+                            "Revenue",
+                          ]}
+                          contentStyle={{
+                            borderRadius: 12,
+                            border: "1px solid #e1e8e4",
+                            fontSize: 12,
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div>
+                      <strong>{formatCurrency(categoryRevenue)}</strong>
+                      <span>Total</span>
+                    </div>
                   </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={100}
-                        paddingAngle={3}
-                        dataKey="value"
-                        label={({ name, percent }) =>
-                          `${name} ${(percent * 100).toFixed(0)}%`
-                        }
-                        labelLine={false}
-                      >
-                        {pieData.map((_, idx) => (
-                          <Cell
-                            key={idx}
-                            fill={PIE_COLORS[idx % PIE_COLORS.length]}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          borderRadius: 10,
-                          border: "1px solid var(--gray-200)",
-                          fontSize: 13,
-                        }}
-                        formatter={(v) => [
-                          `₱${Number(v).toLocaleString()}`,
-                          "Revenue",
-                        ]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-          </div>
+                  <div className="analytics-category-list">
+                    {categoryChart.slice(0, 6).map((category, index) => (
+                      <div key={category.id}>
+                        <i
+                          style={{
+                            background:
+                              CHART_COLORS[index % CHART_COLORS.length],
+                          }}
+                        />
+                        <span>
+                          <strong>{category.name}</strong>
+                          <small>
+                            {categoryRevenue > 0
+                              ? (
+                                  (category.revenue / categoryRevenue) *
+                                  100
+                                ).toFixed(1)
+                              : 0}
+                            %
+                          </small>
+                        </span>
+                        <b>{formatCurrency(category.revenue)}</b>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </article>
+          </section>
 
-          {/* Top products table */}
           {!loading && topProducts.length > 0 && (
-            <div className="card" style={{ marginTop: "1.5rem" }}>
-              <div className="chart-card-header">
-                <h2 className="card-title">Product Performance Details</h2>
+            <section className="analytics-panel analytics-product-table-panel">
+              <div className="analytics-panel-header">
+                <div>
+                  <span>Detailed results</span>
+                  <h2>Product performance</h2>
+                </div>
+                <small>{topProducts.length} products</small>
               </div>
-              <div style={{ overflowX: "auto" }}>
-                <table className="analytics-table">
+              <div className="analytics-table-wrap">
+                <table className="seller-analytics-table">
                   <thead>
                     <tr>
                       <th>Rank</th>
                       <th>Product</th>
                       <th>Category</th>
-                      <th>Units Sold</th>
+                      <th>Units sold</th>
                       <th>Revenue</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {topProducts.map((p, idx) => (
-                      <tr key={p.product_id}>
-                        <td>
-                          <span
-                            className="rank-badge"
-                            style={{
-                              background:
-                                idx < 3
-                                  ? "var(--cm-accent-light)"
-                                  : "var(--gray-100)",
-                              color: idx < 3 ? "#92600A" : "var(--gray-600)",
-                            }}
-                          >
-                            #{idx + 1}
+                    {topProducts.map((product, index) => (
+                      <tr key={product.id}>
+                        <td data-label="Rank">
+                          <span className={index < 3 ? "top" : ""}>
+                            #{index + 1}
                           </span>
                         </td>
-                        <td
-                          className="font-medium"
-                          style={{ fontSize: "0.875rem" }}
-                        >
-                          {p.product?.name}
+                        <td data-label="Product">
+                          <strong>{product.name}</strong>
                         </td>
-                        <td>
+                        <td data-label="Category">
                           <span
-                            className={`badge cat-badge cat-${p.product?.category}`}
-                            style={{ textTransform: "capitalize" }}
+                            className={`analytics-category-badge cat-${product.category}`}
                           >
-                            {p.product?.category}
+                            {titleCase(product.category)}
                           </span>
                         </td>
-                        <td className="font-semibold">{p.total_sold}</td>
-                        <td
-                          className="font-semibold"
-                          style={{ color: "var(--color-primary)" }}
-                        >
-                          {fmt(p.revenue)}
+                        <td data-label="Units sold">{product.sold}</td>
+                        <td data-label="Revenue">
+                          <strong>{formatCurrency(product.revenue)}</strong>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            </div>
+            </section>
+          )}
+
+          {lastUpdated && (
+            <p className="analytics-last-updated">
+              Last updated {format(lastUpdated, "MMM d, yyyy · h:mm a")}
+            </p>
           )}
         </div>
       </main>
-
-      <style>{`
-        .period-toggle { display: flex; border: 1.5px solid var(--cm-border); border-radius: var(--radius-md); overflow: hidden; }
-        .period-btn { padding: 0.375rem 0.875rem; font-size: 0.8rem; font-weight: 500; color: var(--cm-text-secondary); background: #fff; transition: var(--transition-fast); }
-        .period-btn.active { background: var(--cm-primary); color: #fff; }
-        .period-btn:not(.active):hover { background: var(--gray-100); }
-        .chart-card-header { padding: 1.25rem 1.25rem 0.75rem; }
-        .card-title { font-size: 1rem; font-weight: 700; color: var(--gray-900); }
-        .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-        .analytics-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-        .analytics-table th { text-align: left; padding: 0.75rem 1.25rem; color: var(--gray-500); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--gray-200); background: var(--gray-50); }
-        .analytics-table td { padding: 0.875rem 1.25rem; border-bottom: 1px solid var(--gray-100); vertical-align: middle; }
-        .analytics-table tr:last-child td { border-bottom: none; }
-        .rank-badge { padding: 2px 8px; border-radius: var(--radius-full); font-size: 0.75rem; font-weight: 700; }
-        .cat-badge { text-transform: capitalize; font-size: 0.7rem; }
-        .cat-food        { background: #FEF9C3; color: #92400E; }
-        .cat-clothing    { background: #EDE9FE; color: #5B21B6; }
-        .cat-electronics { background: #DBEAFE; color: #1E40AF; }
-        .cat-accessories { background: #FCE7F3; color: #9D174D; }
-        .cat-student-made{ background: var(--cm-secondary-light); color: #15803D; }
-        .cat-other       { background: var(--gray-100); color: var(--gray-700); }
-        @media (max-width: 1024px) { .analytics-grid { grid-template-columns: 1fr; } }
-        @media (max-width: 768px) { .topbar { flex-direction: column; align-items: flex-start; gap: 0.75rem; height: auto; padding: 1rem 1.5rem; } }
-      `}</style>
     </div>
   );
 }

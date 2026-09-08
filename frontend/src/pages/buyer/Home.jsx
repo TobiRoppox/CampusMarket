@@ -1,368 +1,479 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext.jsx";
-import { productService } from "../../services/api.js";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import {
+  FiArrowRight,
+  FiArrowUpRight,
+  FiCheckCircle,
+  FiCoffee,
+  FiGrid,
+  FiMapPin,
+  FiMonitor,
+  FiPackage,
+  FiSearch,
+  FiShoppingBag,
+  FiStar,
+  FiTag,
+  FiUsers,
+} from "react-icons/fi";
 import Navbar from "../../components/common/Navbar.jsx";
 import ProductCard from "../../components/common/ProductCard.jsx";
-import { SkeletonGrid, SkeletonCard } from "../../components/common/UI.jsx";
+import { SkeletonCard, SkeletonGrid } from "../../components/common/Ui.jsx";
+import { useAuth } from "../../context/AuthContext.jsx";
+import { productService, stallService } from "../../services/api.js";
+import "./Home.css";
+import eventService from "../../services/eventService.js";
+
+const IMAGE_ROOT = "/images/buyer";
 
 const CATEGORIES = [
-  { key: "all", label: "All", emoji: "🛍️" },
-  { key: "food", label: "Food", emoji: "🍱" },
-  { key: "clothing", label: "Clothing", emoji: "👗" },
-  { key: "electronics", label: "Electronics", emoji: "📱" },
-  { key: "accessories", label: "Accessories", emoji: "💍" },
-  { key: "student-made", label: "Student Made", emoji: "🎨" },
+  { key: "all", label: "All", icon: FiGrid },
+  { key: "food", label: "Food", icon: FiCoffee },
+  { key: "clothing", label: "Clothing", icon: FiShoppingBag },
+  { key: "electronics", label: "Electronics", icon: FiMonitor },
+  { key: "accessories", label: "Accessories", icon: FiTag },
+  { key: "student-made", label: "Student Made", icon: FiPackage },
 ];
 
-// TODO: swap for eventService.getUpcoming() once that endpoint exists
-const MOCK_EVENTS = [
-  {
-    id: 1,
-    title: "CSU Food Fest 2024",
-    date: "May 10 - 12, 2024",
-    location: "CSUCC Grounds",
-    image: null,
-  },
-  {
-    id: 2,
-    title: "Hiring Karta-An 2024",
-    date: "May 16, 2024",
-    location: "CSUCC Covered Court",
-    image: null,
-  },
-  {
-    id: 3,
-    title: "Eco Fair 2024",
-    date: "May 25 - 26, 2024",
-    location: "CSUCC Grounds",
-    image: null,
-  },
-];
-
-// TODO: swap for stallService.getFeatured() once that endpoint exists
-const MOCK_STALLS = [
-  {
-    id: 1,
-    name: "Sweet Finds PH",
-    category: "Food Stall",
-    rating: 4.8,
-    logo: null,
-  },
-  {
-    id: 2,
-    name: "Crafty Hands",
-    category: "Merchandise",
-    rating: 4.9,
-    logo: null,
-  },
-  {
-    id: 3,
-    name: "Brew Corner",
-    category: "Food Stall",
-    rating: 4.7,
-    logo: null,
-  },
-  {
-    id: 4,
-    name: "Campus Threads",
-    category: "Mixed-Use",
-    rating: 4.6,
-    logo: null,
-  },
-];
+const getProductList = (payload) => {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+};
 
 export default function BuyerHome() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const [activeStalls, setActiveStalls] = useState([]);
+  const [campusEvents, setCampusEvents] = useState([]);
+  const [featuredProducts, setFeaturedProducts] = useState([]);
+  const [marketError, setMarketError] = useState("");
+  const [marketLoading, setMarketLoading] = useState(true);
   const [recommendations, setRecommendations] = useState([]);
   const [products, setProducts] = useState([]);
   const [activeCategory, setActiveCategory] = useState("all");
-  const [recLoading, setRecLoading] = useState(false);
-  const [prodsLoading, setProdsLoading] = useState(false);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [productsLoading, setProductsLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    if (!user) return;
-    setRecLoading(true);
-    productService
-      .getRecommendations(user.id)
-      .then(({ data }) => setRecommendations(data || []))
-      .catch(() => {})
-      .finally(() => setRecLoading(false));
-  }, [user]);
+    let active = true;
+    Promise.all([stallService.getAll(), eventService.getAll(), productService.getAll({ featured: true, limit: 4 })])
+      .then(([stores, events, featured]) => {
+        if (!active) return;
+        setActiveStalls(stores.data);
+        setFeaturedProducts(getProductList(featured.data));
+        setCampusEvents(events.data.filter((event) => new Date(event.end_date || event.date) >= new Date()).slice(0, 3).map((event) => {
+          const start = new Date(event.start_date || event.date);
+          return { ...event, title: event.name, image: event.image_url, date: start.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" }), month: start.toLocaleDateString("en-PH", { month: "short" }), day: start.getDate(), tags: event.description };
+        }));
+      }).catch(() => { if (active) setMarketError("Campus highlights are unavailable. Please refresh to try again."); })
+      .finally(() => { if (active) setMarketLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
-    setProdsLoading(true);
+    if (!user?.id || user.status !== "approved") {
+      setRecommendations([]);
+      return;
+    }
+
+    let active = true;
+    setRecommendationsLoading(true);
+
+    productService
+      .getRecommendations(user.id)
+      .then(({ data }) => {
+        if (active) {
+          setRecommendations(getProductList(data));
+        }
+      })
+      .catch(() => {
+        if (active) setRecommendations([]);
+      })
+      .finally(() => {
+        if (active) setRecommendationsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    let active = true;
+    setProductsLoading(true);
+
     const params = { page, limit: 16 };
     if (activeCategory !== "all") params.category = activeCategory;
+
     productService
       .getAll(params)
       .then(({ data }) => {
-        setProducts((prev) =>
-          page === 1 ? data.data || [] : [...prev, ...(data.data || [])],
+        if (!active) return;
+
+        const nextProducts = getProductList(data);
+        setProducts((previous) =>
+          page === 1 ? nextProducts : [...previous, ...nextProducts],
         );
-        setTotal(data.total || 0);
+        setTotal(Number(data?.total ?? nextProducts.length));
       })
-      .catch(() => {})
-      .finally(() => setProdsLoading(false));
+      .catch(() => {
+        if (!active) return;
+        if (page === 1) setProducts([]);
+        setTotal(0);
+      })
+      .finally(() => {
+        if (active) setProductsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [activeCategory, page]);
 
-  const handleCategory = (key) => {
-    setActiveCategory(key);
+  const handleCategory = (category) => {
+    setActiveCategory(category);
     setPage(1);
     setProducts([]);
   };
+
+  const handleSearch = (event) => {
+    event.preventDefault();
+    const query = searchTerm.trim();
+    navigate(query ? `/browse?q=${encodeURIComponent(query)}` : "/browse");
+  };
+
+  const currentCategory =
+    CATEGORIES.find(({ key }) => key === activeCategory)?.label || "Products";
 
   return (
     <div className="buyer-home">
       <Navbar />
 
-      <div className="buyer-home-content">
-        {/* Hero */}
-        <section className="buyer-hero">
+      <main className="buyer-home-content">
+        <section className="buyer-hero" aria-labelledby="buyer-hero-title">
           <div className="buyer-hero-text">
-            <h1>
-              Find the best products
-              <br />
-              from trusted campus sellers.
-            </h1>
-            <form
-              className="buyer-hero-search"
-              onSubmit={(e) => {
-                e.preventDefault(); /* wire to /browse?q= once ready */
-              }}
-            >
+            <span className="buyer-hero-kicker">
+              Support local <i /> Shop campus <i /> Build community
+            </span>
+
+            <h1 id="buyer-hero-title">Discover campus-made favorites.</h1>
+            <p>
+              Quality products. Student entrepreneurs. A stronger CSU Cabadbaran
+              community.
+            </p>
+
+            <form className="buyer-hero-search" onSubmit={handleSearch}>
+              <FiSearch className="buyer-search-icon" aria-hidden="true" />
+              <label className="sr-only" htmlFor="home-product-search">
+                Search products, stalls, or events
+              </label>
               <input
-                type="text"
-                placeholder="Search products..."
+                id="home-product-search"
+                type="search"
+                placeholder="Search for products, stalls, or events..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(event) => setSearchTerm(event.target.value)}
               />
               <button type="submit" className="btn btn-primary">
                 Search
               </button>
             </form>
+
+            <div className="buyer-hero-trust">
+              <span>
+                <FiCheckCircle aria-hidden="true" /> Verified campus sellers
+              </span>
+              <span>
+                <FiUsers aria-hidden="true" /> Made by the CSUCC community
+              </span>
+            </div>
           </div>
-          <div className="buyer-hero-art">🛍️</div>
         </section>
 
-        {/* AI Recommendations — logged-in only */}
-        {user && (
-          <section className="buyer-section">
-            <div className="buyer-section-header">
-              <h2>AI Recommended for You</h2>
-              <Link to="/browse?rec=1" className="buyer-see-all">
-                See all
-              </Link>
-            </div>
-            <div className="buyer-rec-grid">
-              {recLoading
-                ? Array.from({ length: 4 }).map((_, i) => (
-                    <SkeletonCard key={i} />
-                  ))
-                : recommendations
-                    .slice(0, 4)
-                    .map((p) => <ProductCard key={p.id} product={p} />)}
-            </div>
-          </section>
-        )}
-
-        {/* Featured Stalls — visible to everyone */}
-        <section className="buyer-section">
+        <section
+          className="buyer-section buyer-stalls-section"
+          aria-labelledby="stalls-title"
+        >
           <div className="buyer-section-header">
-            <h2>Featured Stalls</h2>
+            <div>
+              <span className="buyer-section-kicker">Meet campus sellers</span>
+              <h2 id="stalls-title">Active campus stores</h2>
+            </div>
             <Link to="/stalls" className="buyer-see-all">
-              See all
+              See all <FiArrowRight aria-hidden="true" />
             </Link>
           </div>
+
+          {marketLoading && <p role="status">Loading campus highlights…</p>}
+          {marketError && <p role="alert">{marketError}</p>}
+          {!marketLoading && !marketError && !activeStalls.length && <p>No stores are currently open.</p>}
+          <Link to={user ? "/open-store" : "/register"} className="buyer-see-all">Open your campus store <FiArrowRight aria-hidden="true" /></Link>
           <div className="buyer-stall-grid">
-            {MOCK_STALLS.map((stall) => (
+            {activeStalls.map((stall) => (
               <Link
                 to={`/stalls/${stall.id}`}
                 key={stall.id}
                 className="buyer-stall-card"
               >
                 <div className="buyer-stall-logo">
-                  {stall.logo ? (
-                    <img src={stall.logo} alt={stall.name} />
-                  ) : (
-                    stall.name.charAt(0)
-                  )}
+                  {stall.logo_url || stall.banner_url ? <img src={stall.logo_url || stall.banner_url} alt={`${stall.name} products`} /> : <FiShoppingBag aria-hidden="true" />}
                 </div>
                 <div className="buyer-stall-body">
-                  <h3>{stall.name}</h3>
+                  <div className="buyer-stall-name">
+                    <h3>{stall.name}</h3>
+                    <FiCheckCircle aria-label="Verified seller" />
+                  </div>
                   <p>{stall.category}</p>
-                  <p className="buyer-stall-rating">⭐ {stall.rating}</p>
+                  <p className="buyer-stall-rating">
+                    <FiStar aria-hidden="true" />
+                    <strong>{stall.location}</strong>
+                  </p>
                 </div>
+                <FiArrowUpRight
+                  className="buyer-card-arrow"
+                  aria-hidden="true"
+                />
               </Link>
             ))}
           </div>
         </section>
 
-        {/* Upcoming Events — visible to everyone */}
-        <section className="buyer-section">
+        <section
+          className="buyer-section buyer-events-section"
+          aria-labelledby="events-title"
+        >
           <div className="buyer-section-header">
-            <h2>Upcoming Events</h2>
+            <div>
+              <span className="buyer-section-kicker">Happening on campus</span>
+              <h2 id="events-title">Upcoming events</h2>
+            </div>
             <Link to="/events" className="buyer-see-all">
-              See all
+              See all <FiArrowRight aria-hidden="true" />
             </Link>
           </div>
+
+          {!marketLoading && !marketError && !campusEvents.length && <p>No upcoming campus events.</p>}
           <div className="buyer-event-grid">
-            {MOCK_EVENTS.map((ev) => (
+            {campusEvents.map((event) => (
               <Link
-                to={`/events/${ev.id}`}
-                key={ev.id}
+                to={`/events/${event.id}/stalls`}
+                key={event.id}
                 className="buyer-event-card"
               >
                 <div className="buyer-event-thumb">
-                  {ev.image ? <img src={ev.image} alt={ev.title} /> : "📅"}
+                  <img src={event.image} alt="" />
+                  <div className="buyer-event-date" aria-hidden="true">
+                    <span>{event.month}</span>
+                    <strong>{event.day}</strong>
+                  </div>
                 </div>
                 <div className="buyer-event-body">
-                  <h3>{ev.title}</h3>
-                  <p>{ev.date}</p>
-                  <p className="buyer-event-loc">@ {ev.location}</p>
+                  <div>
+                    <p className="buyer-event-meta">{event.date}</p>
+                    <h3>{event.title}</h3>
+                    <p className="buyer-event-loc">
+                      <FiMapPin aria-hidden="true" /> {event.location}
+                    </p>
+                    <span className="buyer-event-tags">{event.tags}</span>
+                  </div>
+                  <span className="buyer-event-link-icon">
+                    <FiArrowUpRight aria-hidden="true" />
+                  </span>
                 </div>
               </Link>
             ))}
           </div>
         </section>
 
-        {/* Category filter */}
-        <div className="category-bar">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat.key}
-              className={`cat-chip ${activeCategory === cat.key ? "active" : ""}`}
-              onClick={() => handleCategory(cat.key)}
-            >
-              <span>{cat.emoji}</span>
-              <span>{cat.label}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Products grid — visible to everyone */}
-        <div className="buyer-section-header">
-          <h2>
-            {activeCategory === "all"
-              ? "All Products"
-              : CATEGORIES.find((c) => c.key === activeCategory)?.label}
-          </h2>
-          <span className="text-muted text-sm">{total} items</span>
-        </div>
-
-        {prodsLoading && page === 1 ? (
-          <SkeletonGrid count={12} />
-        ) : (
-          <>
-            <div className="product-grid fade-in">
-              {products.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
+        {featuredProducts.length > 0 && <section className="buyer-section" aria-labelledby="promoted-title">
+          <div className="buyer-section-header"><div><span className="buyer-section-kicker">Premium store spotlight · Promoted</span><h2 id="promoted-title">Featured products</h2></div></div>
+          <div className="buyer-rec-grid">{featuredProducts.map((product) => <ProductCard key={product.id} product={product} />)}</div>
+        </section>}
+        {user?.status === "approved" && (
+          <section
+            className="buyer-section"
+            aria-labelledby="recommended-title"
+          >
+            <div className="buyer-section-header">
+              <div>
+                <span className="buyer-section-kicker">Selected for you</span>
+                <h2 id="recommended-title">Recommended for you</h2>
+              </div>
+              <Link to="/browse?rec=1" className="buyer-see-all">
+                Browse more <FiArrowRight aria-hidden="true" />
+              </Link>
             </div>
-            {products.length < total && (
-              <div className="load-more">
-                <button
-                  className="btn btn-outline"
-                  onClick={() => setPage((p) => p + 1)}
-                  disabled={prodsLoading}
-                >
-                  {prodsLoading ? (
-                    <span className="spinner spinner-dark" />
-                  ) : (
-                    "Load More"
-                  )}
-                </button>
+
+            {recommendationsLoading ? (
+              <div className="buyer-rec-grid">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <SkeletonCard key={index} />
+                ))}
+              </div>
+            ) : recommendations.length ? (
+              <div className="buyer-rec-grid">
+                {recommendations.slice(0, 4).map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
+            ) : (
+              <div className="buyer-inline-empty">
+                <FiShoppingBag aria-hidden="true" />
+                <div>
+                  <strong>Your recommendations are getting ready.</strong>
+                  <span>
+                    Explore a few products so we can learn what you like.
+                  </span>
+                </div>
+                <Link to="/browse" className="btn btn-outline btn-sm">
+                  Start browsing
+                </Link>
               </div>
             )}
-            {!prodsLoading && products.length === 0 && (
-              <div className="empty-state">
-                <div className="empty-state-icon">🔍</div>
-                <h3>No products found</h3>
-                <p>Try a different category</p>
-              </div>
-            )}
-          </>
+          </section>
         )}
-      </div>
 
-      <style>{`
-        .buyer-home-content { max-width: 1400px; margin: 0 auto; padding: 1.75rem 1.5rem 4rem; }
+        <section
+          className="buyer-products-section"
+          aria-labelledby="products-title"
+        >
+          <div className="buyer-section-header buyer-products-header">
+            <div>
+              <span className="buyer-section-kicker">
+                Explore the marketplace
+              </span>
+              <h2 id="products-title">
+                {activeCategory === "all"
+                  ? "Campus marketplace"
+                  : currentCategory}
+              </h2>
+            </div>
+            <span className="buyer-product-count">
+              {total} {total === 1 ? "item" : "items"}
+            </span>
+          </div>
 
-        .buyer-hero {
-          background: linear-gradient(135deg, #eef8ee 0%, #e6f4e8 100%);
-          border-radius: 20px; padding: 2rem; display: flex; align-items: center;
-          justify-content: space-between; gap: 2rem; margin-bottom: 2rem;
-        }
-        .buyer-hero-text h1 { font-size: 1.75rem; font-weight: 800; color: var(--green-900, #0b3d1e); margin-bottom: 1rem; line-height: 1.25; }
-        .buyer-hero-search { display: flex; gap: 0.5rem; max-width: 420px; }
-        .buyer-hero-search input {
-          flex: 1; padding: 0.65rem 1rem; border-radius: 10px; border: 1px solid var(--gray-200, #e5e7eb); outline: none;
-        }
-        .buyer-hero-art { font-size: 5rem; flex-shrink: 0; }
+          <div
+            className="category-bar"
+            aria-label="Filter products by category"
+          >
+            {CATEGORIES.map((category) => {
+              const CategoryIcon = category.icon;
+              const isActive = category.key === activeCategory;
 
-        .buyer-section { margin-bottom: 2rem; }
-        .buyer-section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-        .buyer-section-header h2 { font-size: 1.15rem; font-weight: 700; color: var(--gray-900, #111827); }
-        .buyer-see-all { color: var(--green-600, #1f9d4d); font-weight: 600; font-size: 0.875rem; text-decoration: none; }
+              return (
+                <button
+                  type="button"
+                  key={category.key}
+                  className={`cat-chip ${isActive ? "active" : ""}`}
+                  onClick={() => handleCategory(category.key)}
+                  aria-pressed={isActive}
+                >
+                  <CategoryIcon aria-hidden="true" />
+                  <span>{category.label}</span>
+                </button>
+              );
+            })}
+          </div>
 
-        .buyer-rec-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+          {productsLoading && page === 1 ? (
+            <SkeletonGrid count={12} />
+          ) : (
+            <>
+              <div className="product-grid fade-in">
+                {products.map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
 
-        .buyer-stall-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
-        .buyer-stall-card {
-          display: flex; align-items: center; gap: 0.75rem; padding: 1rem;
-          border: 1px solid var(--gray-200, #e5e7eb); border-radius: 14px;
-          text-decoration: none; color: inherit; background: #fff; transition: box-shadow 0.15s, transform 0.15s;
-        }
-        .buyer-stall-card:hover { box-shadow: 0 8px 20px rgba(0,0,0,0.08); transform: translateY(-2px); }
-        .buyer-stall-logo {
-          width: 48px; height: 48px; border-radius: 999px; background: var(--green-600, #1f9d4d); color: #fff;
-          display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; overflow: hidden;
-        }
-        .buyer-stall-logo img { width: 100%; height: 100%; object-fit: cover; }
-        .buyer-stall-body h3 { font-size: 0.9rem; font-weight: 700; margin-bottom: 0.15rem; }
-        .buyer-stall-body p { font-size: 0.78rem; color: var(--gray-500, #6b7280); margin: 0; }
-        .buyer-stall-rating { margin-top: 0.15rem !important; }
+              {products.length < total && (
+                <div className="load-more">
+                  <button
+                    type="button"
+                    className="btn btn-outline"
+                    onClick={() => setPage((current) => current + 1)}
+                    disabled={productsLoading}
+                  >
+                    {productsLoading ? (
+                      <>
+                        <span className="spinner spinner-dark" /> Loading
+                      </>
+                    ) : (
+                      <>
+                        Load more <FiArrowRight aria-hidden="true" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
 
-        .buyer-event-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-        .buyer-event-card {
-          border: 1px solid var(--gray-200, #e5e7eb); border-radius: 14px; overflow: hidden;
-          text-decoration: none; color: inherit; background: #fff; transition: box-shadow 0.15s, transform 0.15s;
-        }
-        .buyer-event-card:hover { box-shadow: 0 8px 20px rgba(0,0,0,0.08); transform: translateY(-2px); }
-        .buyer-event-thumb {
-          height: 120px; background: var(--green-900, #0b3d1e); color: #fff;
-          display: flex; align-items: center; justify-content: center; font-size: 2rem;
-        }
-        .buyer-event-thumb img { width: 100%; height: 100%; object-fit: cover; }
-        .buyer-event-body { padding: 0.9rem 1rem; }
-        .buyer-event-body h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 0.25rem; }
-        .buyer-event-body p { font-size: 0.8rem; color: var(--gray-500, #6b7280); margin: 0; }
-        .buyer-event-loc { margin-top: 0.15rem !important; }
+              {!productsLoading && products.length === 0 && (
+                <div className="empty-state buyer-products-empty">
+                  <div className="empty-state-icon">
+                    <FiSearch aria-hidden="true" />
+                  </div>
+                  <h3>No products found</h3>
+                  <p>Try another category or browse all available products.</p>
+                  {activeCategory !== "all" && (
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      onClick={() => handleCategory("all")}
+                    >
+                      View all products
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      </main>
 
-        .category-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 1rem 0 1.25rem; }
-        .cat-chip {
-          display: flex; align-items: center; gap: 0.375rem;
-          padding: 0.5rem 1rem; border-radius: 999px;
-          border: 1.5px solid var(--gray-200, #e5e7eb); background: #fff;
-          font-size: 0.875rem; font-weight: 500; color: var(--gray-600, #4b5563);
-          cursor: pointer; transition: all 0.15s;
-        }
-        .cat-chip:hover { border-color: var(--green-600, #1f9d4d); color: var(--green-600, #1f9d4d); }
-        .cat-chip.active { background: var(--green-600, #1f9d4d); border-color: var(--green-600, #1f9d4d); color: #fff; }
+      <footer className="buyer-home-footer">
+        <div className="buyer-footer-inner">
+          <div className="buyer-footer-grid">
+            <div className="buyer-footer-brand">
+              <Link to="/" aria-label="Campus Market home">
+                <img
+                  src={`${IMAGE_ROOT}/campusmarket-logo.png`}
+                  alt="Campus Market"
+                  loading="lazy"
+                />
+              </Link>
+              <p>
+                Discover student-made favorites, support campus sellers, and
+                connect with your community.
+              </p>
+              <strong>Buy. Sell. Connect.</strong>
+            </div>
 
-        .load-more { display: flex; justify-content: center; margin-top: 2rem; }
+            <nav className="buyer-footer-links" aria-label="Footer navigation">
+              <h2>Explore</h2>
+              <Link to="/browse">Shop products</Link>
+              <Link to="/stalls">Campus stalls</Link>
+              <Link to="/events">Upcoming events</Link>
+            </nav>
 
-        @media (max-width: 1024px) {
-          .buyer-rec-grid, .buyer-stall-grid { grid-template-columns: repeat(2, 1fr); }
-          .buyer-event-grid { grid-template-columns: 1fr; }
-        }
-        @media (max-width: 640px) {
-          .buyer-hero { flex-direction: column; text-align: center; }
-        }
-      `}</style>
+            <div className="buyer-footer-community">
+              <h2>Our campus, our community</h2>
+              <p className="buyer-footer-location">
+                <FiMapPin aria-hidden="true" />
+                <span>Caraga State University<br />Cabadbaran Campus</span>
+              </p>
+              <p>A place for small ideas to make a big impact.</p>
+            </div>
+          </div>
+
+          <div className="buyer-footer-bottom">
+            <small>&copy; {new Date().getFullYear()} Campus Market.</small>
+            <span>Made for the CSUCC community.</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

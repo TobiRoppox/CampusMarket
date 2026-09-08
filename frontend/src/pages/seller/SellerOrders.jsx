@@ -1,342 +1,576 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "../../components/common/Sidebar.jsx";
-import { EmptyState } from "../../components/common/UI.jsx";
 import { orderService } from "../../services/api.js";
 import toast from "react-hot-toast";
 import { format } from "date-fns";
-import { FiRefreshCw } from "react-icons/fi";
+import {
+  FiAlertCircle,
+  FiCheck,
+  FiCheckCircle,
+  FiClock,
+  FiPackage,
+  FiRefreshCw,
+  FiSearch,
+  FiShoppingBag,
+  FiX,
+} from "react-icons/fi";
+import "./SellerOrders.css";
 
 const STATUS_FLOW = {
-  pending: {
-    next: "confirmed",
-    label: "Confirm Order",
-    btnClass: "btn-primary",
-  },
-  confirmed: {
-    next: "ready",
-    label: "Mark as Ready",
-    btnClass: "btn-secondary",
-  },
-  ready: {
-    next: "delivered",
-    label: "Mark Delivered",
-    btnClass: "btn-success",
-  },
-  delivered: { next: null, label: "Completed", btnClass: "btn-ghost" },
-  cancelled: { next: null, label: "Cancelled", btnClass: "btn-ghost" },
+  pending: { next: "confirmed", label: "Confirm order" },
+  confirmed: { next: "ready", label: "Mark as ready" },
+  ready: { next: "delivered", label: "Mark delivered" },
+  delivered: { next: null, label: "Completed" },
+  cancelled: { next: null, label: "Cancelled" },
 };
 
 const STATUS_TABS = [
-  "all",
-  "pending",
-  "confirmed",
-  "ready",
-  "delivered",
-  "cancelled",
+  { key: "all", label: "All orders" },
+  { key: "pending", label: "Pending" },
+  { key: "confirmed", label: "Confirmed" },
+  { key: "ready", label: "Ready" },
+  { key: "delivered", label: "Delivered" },
+  { key: "cancelled", label: "Cancelled" },
 ];
+
+const ORDER_STEPS = ["pending", "confirmed", "ready", "delivered"];
+
+const normalizeStatus = (value) => {
+  const status = String(value || "pending")
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+  if (status === "processing") return "confirmed";
+  if (status === "completed") return "delivered";
+  if (status === "canceled") return "cancelled";
+  return STATUS_FLOW[status] ? status : "pending";
+};
+
+const extractOrders = (payload) => {
+  const value =
+    payload?.data?.orders ?? payload?.orders ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value : [];
+};
+
+const extractStatus = (payload, fallback) =>
+  normalizeStatus(
+    payload?.data?.order?.status ||
+      payload?.order?.status ||
+      payload?.data?.status ||
+      payload?.status ||
+      fallback,
+  );
+
+const normalizeItem = (item, index) => {
+  const product = item?.products || item?.product || {};
+  const quantity = Number(item?.quantity ?? item?.qty ?? 1) || 1;
+  const unitPrice =
+    Number(item?.unit_price ?? item?.price ?? product.price ?? 0) || 0;
+
+  return {
+    id: item?.id || item?.order_item_id || `${product.id || "item"}-${index}`,
+    name: product.name || item?.product_name || item?.name || "Product",
+    image: product.image_url || item?.image_url || null,
+    quantity,
+    unitPrice,
+    subtotal: Number(item?.subtotal) || unitPrice * quantity,
+  };
+};
+
+const normalizeOrder = (order, index) => {
+  const rawItems = order?.order_items || order?.items || [];
+  const items = Array.isArray(rawItems)
+    ? rawItems.map((item, itemIndex) => normalizeItem(item, itemIndex))
+    : [];
+  const buyer = order?.users || order?.buyer || order?.profiles || {};
+  const computedTotal = items.reduce((sum, item) => sum + item.subtotal, 0);
+
+  return {
+    ...order,
+    id: order?.id || order?.order_id || `order-${index + 1}`,
+    status: normalizeStatus(order?.status),
+    createdAt: order?.created_at || order?.order_date || order?.createdAt,
+    total:
+      Number(order?.total ?? order?.total_amount ?? order?.grand_total) ||
+      computedTotal,
+    buyer: {
+      name:
+        buyer.name || buyer.full_name || order?.buyer_name || "Campus buyer",
+      email: buyer.email || order?.buyer_email || "",
+      avatar: buyer.avatar_url || buyer.profile_image || null,
+    },
+    items,
+    notes: order?.delivery_notes || order?.notes || order?.customer_notes || "",
+  };
+};
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+  }).format(Number(value) || 0);
+
+const formatDate = (value) => {
+  if (!value) return "Date unavailable";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Date unavailable"
+    : format(date, "MMM d, yyyy · h:mm a");
+};
+
+const getOrderCode = (id) =>
+  String(id || "")
+    .slice(0, 8)
+    .toUpperCase();
+
+function OrderProgress({ status }) {
+  if (status === "cancelled") {
+    return (
+      <div className="seller-order-cancelled">
+        <FiX /> Order cancelled
+      </div>
+    );
+  }
+
+  const currentIndex = ORDER_STEPS.indexOf(status);
+  return (
+    <div
+      className="seller-order-progress"
+      aria-label={`Order status: ${status}`}
+    >
+      {ORDER_STEPS.map((step, index) => (
+        <div
+          key={step}
+          className={`${index <= currentIndex ? "complete" : ""} ${index === currentIndex ? "current" : ""}`}
+        >
+          <span>{index < currentIndex ? <FiCheck /> : index + 1}</span>
+          <small>{step}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OrderCard({ order, updating, onAdvance, onCancel }) {
+  const flow = STATUS_FLOW[order.status] || STATUS_FLOW.delivered;
+  const detailsRef = useRef(null);
+  const openDetails = () => {
+    detailsRef.current.open = true;
+    detailsRef.current.querySelector("summary").focus();
+  };
+
+  return (
+    <article className="seller-order-card">
+      <header className="seller-order-card-header">
+        <div>
+          <span>Order</span>
+          <h2>#{getOrderCode(order.id)}</h2>
+          <p>{formatDate(order.createdAt)}</p>
+        </div>
+        <div>
+          <span className={`seller-order-badge status-${order.status}`}>
+            {order.status}
+          </span>
+          <strong>{formatCurrency(order.total)}</strong>
+        </div>
+      </header>
+
+      <OrderProgress status={order.status} />
+
+      <div className="seller-order-buyer">
+        <div className="seller-order-avatar">
+          {order.buyer.avatar ? (
+            <img src={order.buyer.avatar} alt="" />
+          ) : (
+            <span>{order.buyer.name.charAt(0).toUpperCase()}</span>
+          )}
+        </div>
+        <div>
+          <small>Buyer</small>
+          <strong>{order.buyer.name}</strong>
+          {order.buyer.email && <p>{order.buyer.email}</p>}
+        </div>
+      </div>
+
+      <div className="seller-order-items">
+        <div className="seller-order-items-heading">
+          <span>Items <small>Click a product to view order details</small></span>
+          <small>
+            {order.items.length} line item{order.items.length === 1 ? "" : "s"}
+          </small>
+        </div>
+
+        {order.items.length === 0 ? (
+          <p className="seller-order-items-missing">
+            Item information is unavailable.
+          </p>
+        ) : (
+          order.items.map((item) => (
+            <button type="button" key={item.id} className="seller-order-item" onClick={openDetails} aria-label={`View order details and buyer notes for ${item.name}`}>
+              <span className="seller-order-item-image">
+                {item.image ? (
+                  <img src={item.image} alt="" loading="lazy" />
+                ) : (
+                  <FiPackage />
+                )}
+              </span>
+              <span>
+                <strong>{item.name}</strong>
+                <small>
+                  {formatCurrency(item.unitPrice)} × {item.quantity}
+                </small>
+              </span>
+              <strong>{formatCurrency(item.subtotal)}</strong>
+            </button>
+          ))
+        )}
+      </div>
+
+      <details ref={detailsRef} className="seller-order-details">
+        <summary>Order details <span>{order.notes ? "Buyer note attached" : "View details"}</span></summary>
+        <div className="seller-order-notes">
+          <span>Buyer note</span>
+          <p>{order.notes || "The buyer did not add a note to this order."}</p>
+        </div>
+        <dl>
+          <dt>Order reference</dt><dd>{order.id}</dd>
+          <dt>Fulfillment</dt><dd>{order.fulfillment === "delivery" ? "Campus delivery" : "Campus pickup"}</dd>
+        </dl>
+      </details>
+
+      {(flow.next || order.status === "pending") && (
+        <footer className="seller-order-card-footer">
+          {order.status === "pending" && (
+            <button
+              type="button"
+              className="seller-order-cancel-button"
+              onClick={onCancel}
+              disabled={updating}
+            >
+              Cancel order
+            </button>
+          )}
+          {flow.next && (
+            <button
+              type="button"
+              className="seller-order-next-button"
+              onClick={() => onAdvance(flow.next)}
+              disabled={updating}
+            >
+              {updating ? (
+                <span className="seller-orders-mini-spinner" />
+              ) : (
+                flow.label
+              )}
+            </button>
+          )}
+        </footer>
+      )}
+    </article>
+  );
+}
 
 export default function SellerOrders() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("all");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
   const [updatingId, setUpdatingId] = useState(null);
 
-  const fetchOrders = () => {
-    setLoading(true);
-    const params = activeTab !== "all" ? { status: activeTab } : {};
-    orderService
-      .getSellerOrders(params)
-      .then(({ data }) => setOrders(data || []))
-      .catch(() => toast.error("Failed to load orders"))
-      .finally(() => setLoading(false));
-  };
+  const fetchOrders = useCallback(async ({ quiet = false } = {}) => {
+    quiet ? setRefreshing(true) : setLoading(true);
+    setError("");
 
-  useEffect(fetchOrders, [activeTab]);
-
-  const handleStatusUpdate = async (orderId, newStatus) => {
     try {
-      setUpdatingId(orderId);
-      const { data } = await orderService.updateStatus(orderId, newStatus);
-      setOrders((prev) =>
-        prev.map((o) => (o.id === orderId ? { ...o, status: data.status } : o)),
+      const { data } = await orderService.getSellerOrders({});
+      setOrders(extractOrders(data).map(normalizeOrder));
+    } catch (requestError) {
+      setError(
+        requestError.response?.data?.error ||
+          "We couldn't load your orders. Please try again.",
       );
-      toast.success(`Order marked as ${newStatus}`);
-    } catch (err) {
-      toast.error(err.response?.data?.error || "Failed to update order");
+      if (!quiet) setOrders([]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
+
+  const tabCounts = useMemo(
+    () =>
+      STATUS_TABS.reduce((counts, tab) => {
+        counts[tab.key] =
+          tab.key === "all"
+            ? orders.length
+            : orders.filter((order) => order.status === tab.key).length;
+        return counts;
+      }, {}),
+    [orders],
+  );
+
+  const displayedOrders = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const filtered = orders.filter((order) => {
+      const matchesStatus = activeTab === "all" || order.status === activeTab;
+      const haystack = [
+        order.id,
+        order.buyer.name,
+        order.buyer.email,
+        ...order.items.map((item) => item.name),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return matchesStatus && (!term || haystack.includes(term));
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "oldest")
+        return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
+      if (sortBy === "total-high") return b.total - a.total;
+      if (sortBy === "total-low") return a.total - b.total;
+      return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    });
+  }, [activeTab, orders, search, sortBy]);
+
+  const summary = useMemo(
+    () => ({
+      pending: orders.filter((order) => order.status === "pending").length,
+      processing: orders.filter((order) =>
+        ["confirmed", "ready"].includes(order.status),
+      ).length,
+      delivered: orders.filter((order) => order.status === "delivered").length,
+      revenue: orders
+        .filter((order) => order.status === "delivered")
+        .reduce((sum, order) => sum + order.total, 0),
+    }),
+    [orders],
+  );
+
+  const handleStatusUpdate = async (order, newStatus) => {
+    if (newStatus === "cancelled") {
+      const confirmed = window.confirm(
+        `Cancel order #${getOrderCode(order.id)}? The buyer will no longer be able to receive it.`,
+      );
+      if (!confirmed) return;
+    }
+
+    try {
+      setUpdatingId(order.id);
+      const { data } = await orderService.updateStatus(order.id, newStatus);
+      const savedStatus = extractStatus(data, newStatus);
+      setOrders((current) =>
+        current.map((item) =>
+          item.id === order.id ? { ...item, status: savedStatus } : item,
+        ),
+      );
+      toast.success(`Order marked as ${savedStatus.replace(/-/g, " ")}`);
+    } catch (requestError) {
+      toast.error(
+        requestError.response?.data?.error || "Failed to update order",
+      );
     } finally {
       setUpdatingId(null);
     }
   };
 
-  const fmt = (p) =>
-    `₱${Number(p).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
-
-  const tabCounts = STATUS_TABS.reduce((acc, tab) => {
-    acc[tab] =
-      tab === "all"
-        ? orders.length
-        : orders.filter((o) => o.status === tab).length;
-    return acc;
-  }, {});
-
-  const displayedOrders =
-    activeTab === "all" ? orders : orders.filter((o) => o.status === activeTab);
+  const clearFilters = () => {
+    setSearch("");
+    setActiveTab("all");
+  };
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout seller-orders-shell">
       <Sidebar />
+
       <main className="dashboard-main">
-        <div className="topbar">
+        <header className="topbar">
           <div className="topbar-left">
             <div className="topbar-titles">
               <h1>Orders</h1>
-              <p>Manage and fulfil your incoming orders.</p>
+              <p>Review, prepare, and complete incoming buyer orders.</p>
             </div>
           </div>
-          <div className="topbar-right">
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={fetchOrders}
-              disabled={loading}
-            >
-              <FiRefreshCw size={14} className={loading ? "spin" : ""} />{" "}
-              Refresh
-            </button>
-          </div>
-        </div>
+          <button
+            type="button"
+            className="seller-orders-refresh"
+            onClick={() => fetchOrders({ quiet: true })}
+            disabled={loading || refreshing}
+          >
+            <FiRefreshCw className={refreshing ? "is-spinning" : ""} /> Refresh
+          </button>
+        </header>
 
-        <div className="dashboard-content">
-          {/* Status tabs */}
-          <div className="order-tabs">
-            {STATUS_TABS.map((tab) => (
+        <div className="dashboard-content seller-orders-content">
+          {error && (
+            <div className="seller-orders-error" role="alert">
+              <FiAlertCircle />
+              <span>{error}</span>
               <button
-                key={tab}
-                className={`order-tab ${activeTab === tab ? "active" : ""}`}
-                onClick={() => setActiveTab(tab)}
+                type="button"
+                onClick={() => fetchOrders({ quiet: true })}
               >
-                <span style={{ textTransform: "capitalize" }}>{tab}</span>
-                {tabCounts[tab] > 0 && (
-                  <span
-                    className={`tab-count ${activeTab === tab ? "active" : ""}`}
-                  >
-                    {tabCounts[tab]}
-                  </span>
-                )}
+                Retry
               </button>
-            ))}
-          </div>
+            </div>
+          )}
 
-          {/* Orders list */}
-          {loading ? (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "1rem" }}
+          <section className="seller-orders-summary" aria-label="Order summary">
+            <article>
+              <span className="tone-gold">
+                <FiClock />
+              </span>
+              <div>
+                <small>Pending</small>
+                <strong>{loading ? "—" : summary.pending}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="tone-blue">
+                <FiPackage />
+              </span>
+              <div>
+                <small>In progress</small>
+                <strong>{loading ? "—" : summary.processing}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="tone-green">
+                <FiCheckCircle />
+              </span>
+              <div>
+                <small>Delivered</small>
+                <strong>{loading ? "—" : summary.delivered}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="tone-dark">₱</span>
+              <div>
+                <small>Completed revenue</small>
+                <strong>
+                  {loading ? "—" : formatCurrency(summary.revenue)}
+                </strong>
+              </div>
+            </article>
+          </section>
+
+          {!loading && orders.length > 0 && (
+            <section
+              className="seller-orders-controls"
+              aria-label="Order filters"
             >
-              {[1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  className="skeleton"
-                  style={{ height: 160, borderRadius: 12 }}
-                />
+              <div className="seller-orders-tabs">
+                {STATUS_TABS.map((tab) => (
+                  <button
+                    type="button"
+                    key={tab.key}
+                    className={activeTab === tab.key ? "active" : ""}
+                    onClick={() => setActiveTab(tab.key)}
+                    aria-pressed={activeTab === tab.key}
+                  >
+                    {tab.label} <span>{tabCounts[tab.key] || 0}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="seller-orders-filter-row">
+                <label className="seller-orders-search">
+                  <FiSearch />
+                  <input
+                    type="search"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search order, buyer, or product"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      aria-label="Clear search"
+                    >
+                      <FiX />
+                    </button>
+                  )}
+                </label>
+                <select
+                  value={sortBy}
+                  onChange={(event) => setSortBy(event.target.value)}
+                  aria-label="Sort orders"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                  <option value="total-high">Highest total</option>
+                  <option value="total-low">Lowest total</option>
+                </select>
+              </div>
+            </section>
+          )}
+
+          {loading ? (
+            <div className="seller-orders-skeleton" aria-label="Loading orders">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <i key={index} />
               ))}
             </div>
+          ) : error && orders.length === 0 ? null : orders.length === 0 ? (
+            <section className="seller-orders-empty">
+              <span>
+                <FiShoppingBag />
+              </span>
+              <small>Order queue</small>
+              <h2>No orders yet</h2>
+              <p>
+                Orders placed by campus buyers will appear here automatically.
+              </p>
+            </section>
           ) : displayedOrders.length === 0 ? (
-            <EmptyState
-              icon="📦"
-              title="No orders"
-              description={`No ${activeTab === "all" ? "" : activeTab} orders found`}
-            />
+            <section className="seller-orders-empty compact">
+              <span>
+                <FiSearch />
+              </span>
+              <h2>No matching orders</h2>
+              <p>Try another search or return to all order statuses.</p>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={clearFilters}
+              >
+                Clear filters
+              </button>
+            </section>
           ) : (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "1rem" }}
-            >
-              {displayedOrders.map((order) => {
-                const flow = STATUS_FLOW[order.status] || STATUS_FLOW.delivered;
-                return (
-                  <div key={order.id} className="order-card card">
-                    <div className="order-card-header">
-                      <div className="order-info">
-                        <p className="order-id">
-                          #{order.id.slice(0, 8).toUpperCase()}
-                        </p>
-                        <p className="text-sm text-muted">
-                          {format(
-                            new Date(order.created_at),
-                            "MMM d, yyyy · h:mm a",
-                          )}
-                        </p>
-                      </div>
-                      <div className="order-header-right">
-                        <span className={`badge status-${order.status}`}>
-                          {order.status}
-                        </span>
-                        <p className="order-total">{fmt(order.total)}</p>
-                      </div>
-                    </div>
-
-                    <div className="buyer-info">
-                      <div className="buyer-avatar">
-                        {order.users?.avatar_url ? (
-                          <img src={order.users.avatar_url} alt="" />
-                        ) : (
-                          <span>{order.users?.name?.charAt(0)}</span>
-                        )}
-                      </div>
-                      <div>
-                        <p
-                          className="font-medium"
-                          style={{ fontSize: "0.875rem" }}
-                        >
-                          {order.users?.name || "Unknown buyer"}
-                        </p>
-                        <p className="text-xs text-muted">
-                          {order.users?.email}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="order-items-list">
-                      {order.order_items?.map((item) => (
-                        <div key={item.id} className="order-line-item">
-                          <div className="order-item-img">
-                            {item.products?.image_url ? (
-                              <img
-                                src={item.products.image_url}
-                                alt={item.products?.name}
-                              />
-                            ) : (
-                              <span>📦</span>
-                            )}
-                          </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p
-                              className="font-medium"
-                              style={{ fontSize: "0.875rem" }}
-                            >
-                              {item.products?.name}
-                            </p>
-                            <p className="text-xs text-muted">
-                              {fmt(item.unit_price)} × {item.quantity}
-                            </p>
-                          </div>
-                          <p
-                            className="font-semibold"
-                            style={{ fontSize: "0.875rem" }}
-                          >
-                            {fmt(item.unit_price * item.quantity)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-
-                    {order.delivery_notes && (
-                      <div className="delivery-notes">
-                        <p className="text-xs text-muted">
-                          📝 {order.delivery_notes}
-                        </p>
-                      </div>
-                    )}
-
-                    {flow.next && (
-                      <div className="order-card-footer">
-                        <button
-                          className={`btn ${flow.btnClass} btn-sm`}
-                          onClick={() =>
-                            handleStatusUpdate(order.id, flow.next)
-                          }
-                          disabled={updatingId === order.id}
-                        >
-                          {updatingId === order.id ? (
-                            <span
-                              className="spinner"
-                              style={{ width: 14, height: 14, borderWidth: 2 }}
-                            />
-                          ) : (
-                            flow.label
-                          )}
-                        </button>
-                        {order.status === "pending" && (
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() =>
-                              handleStatusUpdate(order.id, "cancelled")
-                            }
-                            disabled={updatingId === order.id}
-                          >
-                            Cancel
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            <section>
+              <div className="seller-orders-heading">
+                <div>
+                  <small>Order queue</small>
+                  <h2>
+                    {displayedOrders.length} order
+                    {displayedOrders.length === 1 ? "" : "s"}
+                  </h2>
+                </div>
+                <p>Process orders from oldest to newest when possible.</p>
+              </div>
+              <div className="seller-orders-list">
+                {displayedOrders.map((order) => (
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    updating={updatingId === order.id}
+                    onAdvance={(status) => handleStatusUpdate(order, status)}
+                    onCancel={() => handleStatusUpdate(order, "cancelled")}
+                  />
+                ))}
+              </div>
+            </section>
           )}
         </div>
       </main>
-
-      <style>{`
-        .order-tabs {
-          display: flex; gap: 0.25rem; margin-bottom: 1.25rem;
-          overflow-x: auto; padding-bottom: 4px;
-        }
-        .order-tab {
-          display: flex; align-items: center; gap: 0.5rem;
-          padding: 0.5rem 1rem; border-radius: var(--radius-full);
-          border: 1.5px solid var(--gray-200); background: #fff;
-          font-size: 0.875rem; font-weight: 500; color: var(--gray-600);
-          transition: var(--transition-fast); white-space: nowrap;
-        }
-        .order-tab:hover { border-color: var(--color-primary); color: var(--color-primary); }
-        .order-tab.active { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
-        .tab-count {
-          background: var(--gray-200); color: var(--gray-700);
-          font-size: 0.7rem; font-weight: 700;
-          padding: 1px 6px; border-radius: var(--radius-full);
-        }
-        .tab-count.active { background: rgba(255,255,255,0.3); color: #fff; }
-        .order-card { padding: 0; overflow: hidden; }
-        .order-card-header {
-          display: flex; align-items: flex-start; justify-content: space-between;
-          padding: 1rem 1.25rem; border-bottom: 1px solid var(--gray-100);
-        }
-        .order-id { font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem; color: var(--gray-800); }
-        .order-header-right { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
-        .order-total { font-weight: 700; font-size: 1rem; color: var(--color-primary); }
-        .buyer-info {
-          display: flex; align-items: center; gap: 0.75rem;
-          padding: 0.875rem 1.25rem; background: var(--gray-50);
-          border-bottom: 1px solid var(--gray-100);
-        }
-        .buyer-avatar {
-          width: 36px; height: 36px; border-radius: 50%;
-          background: var(--color-secondary); color: #fff;
-          display: flex; align-items: center; justify-content: center;
-          font-weight: 700; flex-shrink: 0; overflow: hidden;
-        }
-        .buyer-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .order-items-list { padding: 0.875rem 1.25rem; display: flex; flex-direction: column; gap: 0.625rem; }
-        .order-line-item { display: flex; align-items: center; gap: 0.75rem; }
-        .order-item-img {
-          width: 40px; height: 40px; border-radius: var(--radius-md);
-          background: var(--gray-100); overflow: hidden;
-          display: flex; align-items: center; justify-content: center;
-          flex-shrink: 0; font-size: 1.1rem;
-        }
-        .order-item-img img { width: 100%; height: 100%; object-fit: cover; }
-        .delivery-notes {
-          padding: 0.625rem 1.25rem; background: var(--color-warning-light);
-          border-top: 1px solid var(--gray-100);
-        }
-        .order-card-footer {
-          display: flex; gap: 0.625rem; align-items: center;
-          padding: 0.875rem 1.25rem; border-top: 1px solid var(--gray-100);
-          background: var(--gray-50);
-        }
-        .btn-success { background: var(--color-success); color: #fff; border-color: var(--color-success); }
-        .btn-success:hover { background: #15803D; }
-        .spin { animation: spin 0.7s linear infinite; }
-      `}</style>
     </div>
   );
 }

@@ -1,399 +1,510 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import Sidebar from "../../components/common/Sidebar.jsx";
-import { StatCard } from "../../components/common/UI.jsx";
 import { analyticsService, orderService } from "../../services/api.js";
 import { useAuth } from "../../context/AuthContext.jsx";
 import {
-  FiDollarSign,
-  FiShoppingBag,
-  FiPackage,
-  FiStar,
+  FiAlertCircle,
   FiArrowRight,
+  FiDollarSign,
+  FiPackage,
+  FiRefreshCw,
+  FiShoppingBag,
   FiTrendingUp,
 } from "react-icons/fi";
 import {
-  LineChart,
+  CartesianGrid,
   Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
 } from "recharts";
 import { format } from "date-fns";
+import "./Dashboard.css";
+
+const unwrapObject = (payload) => payload?.data || payload || {};
+
+const unwrapArray = (payload, key) => {
+  const value =
+    payload?.data?.[key] ?? payload?.[key] ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value : [];
+};
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
+
+const formatCompactCurrency = (value) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(Number(value) || 0);
+
+const formatSafeDate = (value, pattern, fallback = "—") => {
+  if (!value) return fallback;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : format(date, pattern);
+};
+
+const getBuyerName = (order) =>
+  order?.users?.name ||
+  order?.buyer?.name ||
+  order?.profiles?.full_name ||
+  order?.buyer_name ||
+  "Campus buyer";
+
+const getOrderTotal = (order) =>
+  order?.total ?? order?.total_amount ?? order?.grand_total ?? 0;
+
+const getOrderStatus = (order) =>
+  String(order?.status || "pending")
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+
+function DashboardMetric({
+  icon,
+  label,
+  value,
+  note,
+  tone = "green",
+  loading,
+}) {
+  return (
+    <article className={`seller-metric-card tone-${tone}`}>
+      <div className="seller-metric-icon">{icon}</div>
+      <div className="seller-metric-copy">
+        <span>{label}</span>
+        {loading ? (
+          <i className="seller-dashboard-shimmer" />
+        ) : (
+          <strong>{value}</strong>
+        )}
+        <small>{note}</small>
+      </div>
+    </article>
+  );
+}
 
 export default function SellerDashboard() {
   const { user } = useAuth();
-  const [sales, setSales] = useState(null);
+  const [sales, setSales] = useState({});
   const [topProducts, setTopProducts] = useState([]);
   const [recentOrders, setRecentOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [lastUpdated, setLastUpdated] = useState(null);
 
-  useEffect(() => {
-    Promise.all([
+  const loadDashboard = useCallback(async ({ quiet = false } = {}) => {
+    quiet ? setRefreshing(true) : setLoading(true);
+    setError("");
+
+    const results = await Promise.allSettled([
       analyticsService.getSales(30),
       analyticsService.getTopProducts(),
       orderService.getSellerOrders({ status: "" }),
-    ])
-      .then(([s, t, o]) => {
-        setSales(s.data);
-        setTopProducts(t.data.slice(0, 5));
-        setRecentOrders(o.data.slice(0, 6));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    ]);
+
+    const [salesResult, productsResult, ordersResult] = results;
+    const failedRequests = results.filter(
+      (result) => result.status === "rejected",
+    ).length;
+
+    if (salesResult.status === "fulfilled") {
+      setSales(unwrapObject(salesResult.value.data));
+    }
+    if (productsResult.status === "fulfilled") {
+      setTopProducts(
+        unwrapArray(productsResult.value.data, "products").slice(0, 5),
+      );
+    }
+    if (ordersResult.status === "fulfilled") {
+      setRecentOrders(
+        unwrapArray(ordersResult.value.data, "orders").slice(0, 6),
+      );
+    }
+
+    if (failedRequests > 0) {
+      setError(
+        results.some((result) => result.status === "rejected" && result.reason.response?.data?.code === "PREMIUM_REQUIRED")
+          ? "Free plan: record counter sales in Point of Sale. Product analytics and advertising are available with Premium through the campus administrator."
+          : failedRequests === results.length
+          ? "Dashboard data is temporarily unavailable. Please try again."
+          : "Some dashboard information could not be updated.",
+      );
+    } else {
+      setLastUpdated(new Date());
+    }
+
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  const fmt = (p) =>
-    `₱${Number(p).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
 
-  const chartData = (sales?.timeline || []).map((d) => ({
-    date: format(new Date(d.date), "MMM d"),
-    revenue: d.revenue,
-    orders: d.orders,
-  }));
+  const chartData = useMemo(
+    () =>
+      (Array.isArray(sales?.timeline) ? sales.timeline : [])
+        .map((entry) => ({
+          date: formatSafeDate(entry.date, "MMM d", ""),
+          revenue: Number(entry.revenue) || 0,
+          orders: Number(entry.orders) || 0,
+        }))
+        .filter((entry) => entry.date),
+    [sales],
+  );
+
+  const pendingOrders = recentOrders.filter((order) =>
+    ["pending", "processing", "confirmed"].includes(getOrderStatus(order)),
+  ).length;
+  const firstName = user?.name?.trim().split(/\s+/)[0] || "Seller";
+  const maxSold = Math.max(
+    1,
+    ...topProducts.map((product) =>
+      Number(product.total_sold ?? product.sold_count ?? 0),
+    ),
+  );
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout seller-dashboard-shell">
       <Sidebar />
+
       <main className="dashboard-main">
-        <div className="topbar">
+        <header className="topbar seller-dashboard-topbar">
           <div className="topbar-left">
             <div className="topbar-titles">
-              <h1>Welcome back, {user?.name?.split(" ")[0]} 👋</h1>
-              <p>Here's what's happening with your stall today.</p>
+              <h1>Welcome back, {firstName}</h1>
+              <p>Here is your stall performance for the last 30 days.</p>
             </div>
           </div>
-        </div>
 
-        <div className="dashboard-content">
-          {/* Welcome banner */}
-          <div className="dash-hero">
-            <div className="dash-hero-card">
-              <p className="dash-hero-eyebrow">Seller insights</p>
-              <h2 className="dash-hero-title">
-                Grow your campus stall with smarter listings and order
-                visibility.
-              </h2>
-              <p className="dash-hero-note">
-                Keep your products stocked, watch daily revenue, and manage
-                orders from one beautiful dashboard.
+          <div className="seller-dashboard-topbar-actions">
+            {lastUpdated && (
+              <span>Updated {formatSafeDate(lastUpdated, "h:mm a")}</span>
+            )}
+            <button
+              type="button"
+              className="seller-refresh-button"
+              onClick={() => loadDashboard({ quiet: true })}
+              disabled={loading || refreshing}
+            >
+              <FiRefreshCw className={refreshing ? "is-spinning" : ""} />
+              Refresh
+            </button>
+          </div>
+        </header>
+
+        <div className="dashboard-content seller-dashboard-content">
+          {error && (
+            <div className="seller-dashboard-alert" role="alert">
+              <FiAlertCircle />
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => loadDashboard({ quiet: true })}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          <section className="seller-dashboard-hero">
+            <div className="seller-dashboard-hero-copy">
+              <span>Seller workspace</span>
+              <h2>Run your campus stall with clarity.</h2>
+              <p>
+                Track sales, prioritize new orders, and keep your best products
+                ready for buyers—all from one place.
               </p>
-              <div className="dash-hero-actions">
-                <Link to="/seller/products" className="btn btn-outline">
-                  Manage products
+              <div>
+                <Link to="/seller/products" className="btn btn-primary">
+                  Manage products <FiArrowRight />
                 </Link>
-                <Link to="/seller/orders" className="btn btn-ghost">
+                <Link to="/seller/orders" className="btn btn-outline">
                   Review orders
                 </Link>
               </div>
             </div>
-            <div className="dash-tip-card">
-              <h3>Performance tip</h3>
-              <p>
-                Update your top products and restock frequently to keep buyer
-                interest high during campus events.
-              </p>
-            </div>
-          </div>
 
-          {/* Stats row */}
-          <div className="stats-grid" style={{ marginBottom: "1.5rem" }}>
-            <StatCard
-              label="Total Revenue"
-              value={loading ? "—" : fmt(sales?.total_revenue || 0)}
+          </section>
+
+          <section
+            className="seller-metrics-grid"
+            aria-label="Seller performance summary"
+          >
+            <DashboardMetric
+              label="Total revenue"
+              value={formatCurrency(sales?.total_revenue)}
+              note="Last 30 days"
               icon={<FiDollarSign />}
-              color="gold"
+              tone="gold"
+              loading={loading}
             />
-            <StatCard
-              label="Total Orders"
-              value={loading ? "—" : sales?.total_orders || 0}
+            <DashboardMetric
+              label="Total orders"
+              value={Number(sales?.total_orders) || 0}
+              note="Completed and active"
               icon={<FiShoppingBag />}
-              color="green"
+              tone="green"
+              loading={loading}
             />
-            <StatCard
-              label="Avg Order Value"
-              value={loading ? "—" : fmt(sales?.avg_order_value || 0)}
+            <DashboardMetric
+              label="Average order"
+              value={formatCurrency(sales?.avg_order_value)}
+              note="Revenue per order"
               icon={<FiTrendingUp />}
-              color="info"
+              tone="blue"
+              loading={loading}
             />
-            <StatCard
-              label="Top Products"
-              value={loading ? "—" : topProducts.length}
-              icon={<FiStar />}
-              color="gray"
+            <DashboardMetric
+              label="Needs attention"
+              value={pendingOrders}
+              note="Recent active orders"
+              icon={<FiPackage />}
+              tone="orange"
+              loading={loading}
             />
-          </div>
+          </section>
 
-          <div className="dash-grid">
-            {/* Revenue chart */}
-            <div className="cm-card">
-              <div
-                className="cm-card-header"
-                style={{ padding: "1.25rem 1.25rem 0" }}
-              >
+          <section className="seller-dashboard-main-grid">
+            <article className="seller-dashboard-panel seller-revenue-panel">
+              <div className="seller-panel-header">
                 <div>
-                  <h2 className="cm-card-title">Revenue — Last 30 Days</h2>
+                  <span>Revenue trend</span>
+                  <h2>Last 30 days</h2>
                 </div>
-                <Link to="/seller/analytics" className="btn btn-ghost btn-sm">
-                  Full analytics <FiArrowRight size={14} />
+                <Link to="/seller/analytics">
+                  Full analytics <FiArrowRight />
                 </Link>
               </div>
-              <div style={{ height: 260, padding: "0 1.25rem 1.25rem" }}>
+
+              <div className="seller-chart-area">
                 {loading ? (
-                  <div
-                    className="skeleton"
-                    style={{ height: "100%", borderRadius: 8 }}
-                  />
+                  <div className="seller-chart-skeleton seller-dashboard-shimmer" />
+                ) : chartData.length === 0 ? (
+                  <div className="seller-panel-empty">
+                    <FiTrendingUp />
+                    <h3>No revenue activity yet</h3>
+                    <p>
+                      Your sales trend will appear after buyers place orders.
+                    </p>
+                  </div>
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
                       data={chartData}
-                      margin={{ top: 5, right: 20, left: 0, bottom: 5 }}
+                      margin={{ top: 8, right: 10, left: -10, bottom: 0 }}
                     >
                       <CartesianGrid
+                        vertical={false}
                         strokeDasharray="3 3"
-                        stroke="var(--gray-200)"
+                        stroke="#e9eeeb"
                       />
                       <XAxis
                         dataKey="date"
-                        tick={{
-                          fontSize: 11,
-                          fill: "var(--cm-text-secondary)",
-                        }}
-                        tickLine={false}
-                      />
-                      <YAxis
-                        tick={{
-                          fontSize: 11,
-                          fill: "var(--cm-text-secondary)",
-                        }}
+                        tick={{ fontSize: 10, fill: "#819087" }}
                         tickLine={false}
                         axisLine={false}
-                        tickFormatter={(v) => `₱${v}`}
+                        minTickGap={20}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 10, fill: "#819087" }}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={formatCompactCurrency}
                       />
                       <Tooltip
-                        contentStyle={{
-                          borderRadius: 10,
-                          border: "1px solid var(--cm-border)",
-                          fontSize: 13,
+                        cursor={{
+                          stroke: "rgba(15,123,62,.18)",
+                          strokeWidth: 1,
                         }}
-                        formatter={(v) => [`₱${v.toLocaleString()}`, "Revenue"]}
+                        contentStyle={{
+                          borderRadius: 12,
+                          border: "1px solid #e1e8e4",
+                          boxShadow: "0 10px 28px rgba(15,52,34,.10)",
+                          fontSize: 12,
+                        }}
+                        formatter={(value) => [
+                          formatCurrency(value),
+                          "Revenue",
+                        ]}
                       />
                       <Line
                         type="monotone"
                         dataKey="revenue"
-                        stroke="var(--cm-accent)"
+                        stroke="#0f7b3e"
                         strokeWidth={2.5}
                         dot={false}
-                        activeDot={{ r: 5 }}
+                        activeDot={{
+                          r: 4,
+                          fill: "#0f7b3e",
+                          stroke: "#fff",
+                          strokeWidth: 2,
+                        }}
                       />
                     </LineChart>
                   </ResponsiveContainer>
                 )}
               </div>
-            </div>
+            </article>
 
-            {/* Top products */}
-            <div className="cm-card">
-              <div
-                className="cm-card-header"
-                style={{ padding: "1.25rem 1.25rem 0" }}
-              >
-                <h2 className="cm-card-title">Top Products</h2>
-                <Link to="/seller/products" className="btn btn-ghost btn-sm">
-                  View all <FiArrowRight size={14} />
+            <article className="seller-dashboard-panel seller-top-products-panel">
+              <div className="seller-panel-header">
+                <div>
+                  <span>Product performance</span>
+                  <h2>Top products</h2>
+                </div>
+                <Link to="/seller/products">
+                  View all <FiArrowRight />
                 </Link>
               </div>
+
               {loading ? (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                    padding: "0 1.25rem 1.25rem",
-                  }}
-                >
-                  {[1, 2, 3, 4, 5].map((i) => (
-                    <div
-                      key={i}
-                      className="skeleton"
-                      style={{ height: 40, borderRadius: 8 }}
-                    />
+                <div className="seller-list-skeleton">
+                  {Array.from({ length: 5 }).map((_, index) => (
+                    <i key={index} className="seller-dashboard-shimmer" />
                   ))}
                 </div>
               ) : topProducts.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon">
-                    <FiPackage size={32} />
-                  </div>
+                <div className="seller-panel-empty compact">
+                  <FiPackage />
                   <h3>No products yet</h3>
-                  <p>
-                    Add your first product to start seeing performance here.
-                  </p>
+                  <p>Add your first product to begin tracking performance.</p>
+                  <Link
+                    to="/seller/products"
+                    className="btn btn-outline btn-sm"
+                  >
+                    Manage products
+                  </Link>
                 </div>
               ) : (
-                <div
-                  className="top-products-list"
-                  style={{ padding: "0 1.25rem 1.25rem" }}
-                >
-                  {topProducts.map((p, idx) => (
-                    <div key={p.product_id} className="top-product-row">
-                      <span className="top-rank">#{idx + 1}</span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <p
-                          className="font-medium"
-                          style={{
-                            fontSize: "0.875rem",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {p.product?.name}
-                        </p>
-                        <p className="text-xs text-muted">
-                          {p.total_sold} sold · {fmt(p.revenue)}
-                        </p>
-                      </div>
-                      <div className="top-bar-wrap">
-                        <div
-                          className="top-bar"
-                          style={{
-                            width: `${Math.round((p.total_sold / (topProducts[0]?.total_sold || 1)) * 100)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ol className="seller-top-products-list">
+                  {topProducts.map((product, index) => {
+                    const sold = Number(
+                      product.total_sold ?? product.sold_count ?? 0,
+                    );
+                    const name =
+                      product.product?.name ||
+                      product.name ||
+                      "Untitled product";
+                    return (
+                      <li
+                        key={
+                          product.product_id || product.id || `${name}-${index}`
+                        }
+                      >
+                        <span className="seller-product-rank">{index + 1}</span>
+                        <div className="seller-product-performance">
+                          <div>
+                            <strong title={name}>{name}</strong>
+                            <small>
+                              {sold} sold ·{" "}
+                              {formatCurrency(
+                                product.revenue ?? product.total_revenue,
+                              )}
+                            </small>
+                          </div>
+                          <span>
+                            <i
+                              style={{
+                                width: `${Math.max(5, Math.round((sold / maxSold) * 100))}%`,
+                              }}
+                            />
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
               )}
-            </div>
-          </div>
+            </article>
+          </section>
 
-          {/* Recent orders */}
-          <div className="cm-card" style={{ marginTop: "1.5rem" }}>
-            <div
-              className="cm-card-header"
-              style={{ padding: "1.25rem 1.25rem 0" }}
-            >
-              <h2 className="cm-card-title">Recent Orders</h2>
-              <Link to="/seller/orders" className="btn btn-ghost btn-sm">
-                View all <FiArrowRight size={14} />
+          <section className="seller-dashboard-panel seller-orders-panel">
+            <div className="seller-panel-header">
+              <div>
+                <span>Order activity</span>
+                <h2>Recent orders</h2>
+              </div>
+              <Link to="/seller/orders">
+                View all <FiArrowRight />
               </Link>
             </div>
+
             {loading ? (
-              <div
-                style={{
-                  padding: "0 1.25rem 1.25rem",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 10,
-                }}
-              >
-                {[1, 2, 3].map((i) => (
-                  <div
-                    key={i}
-                    className="skeleton"
-                    style={{ height: 52, borderRadius: 8 }}
-                  />
+              <div className="seller-order-skeleton">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <i key={index} className="seller-dashboard-shimmer" />
                 ))}
               </div>
             ) : recentOrders.length === 0 ? (
-              <div className="empty-state">
+              <div className="seller-panel-empty">
+                <FiShoppingBag />
                 <h3>No orders yet</h3>
-                <p>Orders from buyers will show up here once they come in.</p>
+                <p>New buyer orders will appear here automatically.</p>
               </div>
             ) : (
-              <div
-                className="orders-table-wrap"
-                style={{ padding: "0 1.25rem 1.25rem" }}
-              >
-                <table className="orders-table">
+              <div className="seller-orders-table-wrap">
+                <table className="seller-orders-table">
                   <thead>
                     <tr>
-                      <th>Order ID</th>
+                      <th>Order</th>
                       <th>Buyer</th>
-                      <th>Total</th>
                       <th>Date</th>
+                      <th>Total</th>
                       <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {recentOrders.map((o) => (
-                      <tr key={o.id}>
-                        <td className="mono-cell">
-                          #{o.id.slice(0, 8).toUpperCase()}
-                        </td>
-                        <td>{o.users?.name || "—"}</td>
-                        <td
-                          className="font-semibold"
-                          style={{ color: "var(--cm-primary)" }}
-                        >
-                          {fmt(o.total)}
-                        </td>
-                        <td className="text-muted text-sm">
-                          {format(new Date(o.created_at), "MMM d, yyyy")}
-                        </td>
-                        <td>
-                          <span className={`badge status-${o.status}`}>
-                            {o.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {recentOrders.map((order, index) => {
+                      const id = String(
+                        order.id || order.order_id || index + 1,
+                      );
+                      const status = getOrderStatus(order);
+                      return (
+                        <tr key={id}>
+                          <td data-label="Order">
+                            <strong>#{id.slice(0, 8).toUpperCase()}</strong>
+                          </td>
+                          <td data-label="Buyer">{getBuyerName(order)}</td>
+                          <td data-label="Date">
+                            {formatSafeDate(
+                              order.created_at || order.order_date,
+                              "MMM d, yyyy",
+                            )}
+                          </td>
+                          <td data-label="Total">
+                            <strong>
+                              {formatCurrency(getOrderTotal(order))}
+                            </strong>
+                          </td>
+                          <td data-label="Status">
+                            <span
+                              className={`seller-order-status status-${status}`}
+                            >
+                              {status.replace(/-/g, " ")}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             )}
-          </div>
+          </section>
         </div>
       </main>
-
-      {/* These classes were referenced in the JSX above but never defined
-          in global.css / variables.css — adding them here so the welcome
-          banner, top-product bars, and order ID styling actually render
-          instead of falling back to unstyled text. */}
-      <style>{`
-        .dash-hero {
-          display: grid; grid-template-columns: 2fr 1fr; gap: var(--space-3);
-          margin-bottom: var(--space-3);
-        }
-        .dash-hero-card {
-          background: linear-gradient(135deg, var(--cm-primary) 0%, var(--cm-primary-hover) 100%);
-          color: #fff; border-radius: var(--radius-lg);
-          padding: var(--space-3); display: flex; flex-direction: column; gap: 0.5rem;
-        }
-        .dash-hero-eyebrow {
-          font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
-          letter-spacing: 0.06em; opacity: 0.85;
-        }
-        .dash-hero-title { font-size: 1.35rem; font-weight: 800; line-height: 1.3; }
-        .dash-hero-note { font-size: 0.875rem; opacity: 0.9; line-height: 1.6; margin-bottom: 0.25rem; }
-        .dash-hero-actions { display: flex; gap: 0.625rem; flex-wrap: wrap; margin-top: 0.5rem; }
-        .dash-hero-actions .btn-outline { border-color: rgba(255,255,255,0.6); color: #fff; }
-        .dash-hero-actions .btn-outline:hover { background: rgba(255,255,255,0.15); }
-        .dash-hero-actions .btn-ghost { color: rgba(255,255,255,0.85); }
-        .dash-hero-actions .btn-ghost:hover { background: rgba(255,255,255,0.1); color: #fff; }
-
-        .dash-tip-card {
-          background: var(--cm-accent-light); border: 1px solid var(--cm-accent);
-          border-radius: var(--radius-lg); padding: var(--space-3);
-          display: flex; flex-direction: column; gap: 0.5rem; justify-content: center;
-        }
-        .dash-tip-card h3 { font-size: 0.9rem; font-weight: 700; color: #92600A; }
-        .dash-tip-card p { font-size: 0.825rem; color: #92600A; line-height: 1.55; opacity: 0.9; }
-
-        .top-bar-wrap { width: 56px; height: 6px; background: var(--gray-100); border-radius: var(--radius-full); overflow: hidden; flex-shrink: 0; }
-        .top-bar { height: 100%; background: var(--cm-accent); border-radius: var(--radius-full); transition: width 0.5s ease; }
-
-        .mono-cell { font-family: var(--font-mono); font-size: 0.8rem; color: var(--gray-700); }
-
-        @media (max-width: 900px) {
-          .dash-hero { grid-template-columns: 1fr; }
-        }
-      `}</style>
     </div>
   );
 }

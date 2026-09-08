@@ -14,6 +14,8 @@ import productRoutes from "./routes/product.routes.js";
 import stallRoutes from "./routes/stall.routes.js";
 import orderRoutes from "./routes/order.routes.js";
 import eventRoutes from "./routes/event.routes.js";
+import posRoutes from "./routes/pos.routes.js";
+import { productPhotoDirectory } from "./middleware/productPhoto.js";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -38,6 +40,7 @@ const limiter = rateLimit({
   message: { error: "Too many requests, please try again later." },
 });
 app.use(limiter);
+app.use("/api/product-images", express.static(productPhotoDirectory, { dotfiles: "deny", index: false, maxAge: "1d" }));
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {
@@ -46,6 +49,7 @@ app.get("/api/health", (_req, res) => {
 
 // ── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/auth", authRoutes);
+app.use("/api/pos", posRoutes);
 app.use("/api/cart", cartRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/analytics", analyticsRoutes);

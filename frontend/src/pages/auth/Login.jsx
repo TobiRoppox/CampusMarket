@@ -17,12 +17,18 @@ export default function Login() {
     setLoading(true);
     setError("");
     try {
-      const user = await login(form.email, form.password);
-      if (user?.role === "admin") navigate("/admin");
+      const user = await login(form.email.trim(), form.password);
+      if (user?.status !== "approved") navigate("/account-status");
+      else if (user?.role === "admin") navigate("/admin");
       else if (user?.role === "seller") navigate("/seller");
       else navigate("/");
-    } catch {
-      setError("Invalid email or password. Please try again.");
+    } catch (err) {
+      setError(
+        err.response?.data?.error ||
+          (!err.response
+            ? "Unable to connect to the server. Please make sure the backend is running and try again."
+            : "Unable to sign in. Please try again."),
+      );
     } finally {
       setLoading(false);
     }

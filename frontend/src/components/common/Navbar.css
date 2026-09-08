@@ -1,0 +1,20 @@
+.navbar-brand-logo {
+  display: block;
+  width: clamp(150px, 12vw, 190px);
+  height: 46px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+@media (max-width: 1120px) {
+  .navbar-brand-logo {
+    width: 145px;
+  }
+}
+
+@media (max-width: 760px) {
+  .navbar-brand-logo {
+    width: 132px;
+    height: 40px;
+  }
+}

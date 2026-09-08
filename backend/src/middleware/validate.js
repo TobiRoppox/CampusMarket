@@ -21,13 +21,28 @@ export const validate = (schema) => (req, res, next) => {
 
 export const registerSchema = z.object({
   name: z.string().min(2).max(80),
-  email: z.string().email(),
+  email: z.string().trim().email().toLowerCase(),
   password: z.string().min(8).max(100),
   role: z.enum(["buyer", "seller"]).default("buyer"),
+  campus_id: z.string().trim().min(3).max(50),
+  affiliation: z.enum(["student", "faculty", "employee"]),
+  department: z.string().trim().min(2).max(120),
+  store_name: z.string().trim().max(100).optional(),
+  campus_location: z.string().trim().max(150).optional(),
+}).refine((value) => value.role !== "seller" || (value.store_name?.length >= 2 && value.campus_location?.length >= 2), {
+  message: "Sellers must provide a store name and CSUCC campus location.", path: ["store_name"],
 });
 
+export const credentialsSchema = z.object({
+  campus_id: z.string().trim().min(3).max(50),
+  affiliation: z.enum(["student", "faculty", "employee"]),
+  department: z.string().trim().min(2).max(120),
+});
+
+const imageUrl = z.string().max(2000).refine((value) => !value || /^https?:\/\//i.test(value) || /^\/images\//.test(value) || /^\/api\/product-images\/[a-f0-9-]+\.(png|jpg|webp)$/.test(value), "Choose a product photo or a valid image URL.");
+
 export const loginSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email().toLowerCase(),
   password: z.string().min(1),
 });
 
@@ -44,14 +59,36 @@ export const productSchema = z.object({
     "student-made",
     "other",
   ]),
-  image_url: z.string().url().optional(),
+  image_url: imageUrl.optional(),
   stall_id: z.string().uuid(),
+  is_active: z.boolean().optional(),
 });
+
+export const productUpdateSchema = productSchema.omit({ stall_id: true }).partial();
 
 export const stallSchema = z.object({
   name: z.string().min(2).max(100),
   description: z.string().max(1000).optional(),
-  banner_url: z.string().url().optional(),
+  banner_url: imageUrl.optional(),
+  logo_url: imageUrl.optional(),
+  location: z.string().trim().min(2).max(150),
+  category: z.string().trim().min(2).max(50).optional(),
+  contact_number: z.string().max(30).optional(),
+  operating_hours: z.string().max(150).optional(),
+  is_active: z.boolean().optional(),
+});
+
+export const reviewRegistrationSchema = z.object({
+  status: z.enum(["approved", "rejected"]),
+  note: z.string().trim().min(5).max(500),
+  credentials_checked: z.boolean().optional(),
+}).refine((value) => value.status !== "approved" || value.credentials_checked === true, { message: "Confirm that credentials were checked against CSUCC records." });
+
+export const posSchema = z.object({
+  request_id: z.string().uuid(),
+  buyer_id: z.string().uuid(),
+  items: z.array(z.object({ product_id: z.string().uuid(), quantity: z.number().int().positive().max(10000) })).min(1).max(50),
+  cash_received: z.number().nonnegative().max(1000000),
 });
 
 export const orderSchema = z.object({
@@ -64,6 +101,8 @@ export const orderSchema = z.object({
     )
     .min(1),
   delivery_notes: z.string().max(500).optional(),
+  notes: z.string().trim().max(500).optional(),
+  fulfillment: z.enum(["pickup", "delivery"]).default("pickup"),
 });
 
 export const messageSchema = z.object({

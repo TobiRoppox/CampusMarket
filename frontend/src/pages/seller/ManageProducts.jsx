@@ -1,17 +1,23 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Sidebar from "../../components/common/Sidebar.jsx";
-import { Modal, EmptyState } from "../../components/common/UI.jsx";
+import { Modal } from "../../components/common/Ui.jsx";
 import { productService, stallService } from "../../services/api.js";
 import toast from "react-hot-toast";
 import {
-  FiPlus,
+  FiAlertCircle,
   FiEdit2,
-  FiTrash2,
-  FiSearch,
   FiEye,
   FiEyeOff,
+  FiImage,
   FiPackage,
+  FiPlus,
+  FiRefreshCw,
+  FiSearch,
+  FiTrash2,
+  FiTrendingDown,
+  FiX,
 } from "react-icons/fi";
+import "./ManageProducts.css";
 
 const CATEGORIES = [
   "food",
@@ -32,54 +38,214 @@ const EMPTY_FORM = {
   stall_id: "",
 };
 
+const extractStall = (payload) => {
+  const value =
+    payload?.data?.stall ?? payload?.stall ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value[0] || null : value || null;
+};
+
+const extractProducts = (payload) => {
+  const value =
+    payload?.data?.products ?? payload?.products ?? payload?.data ?? payload;
+  return Array.isArray(value) ? value : [];
+};
+
+const extractProduct = (payload) =>
+  payload?.data?.product || payload?.product || payload?.data || payload || {};
+
+const normalizeProduct = (product) => ({
+  ...product,
+  id: product.id || product.product_id,
+  name: product.name || product.product_name || "Untitled product",
+  description: product.description || "",
+  price: Number(product.price) || 0,
+  stock: Number(product.stock ?? product.quantity ?? 0),
+  category: product.category || "other",
+  image_url: product.image_url || product.image || "",
+  is_active: product.is_active !== false,
+});
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-PH", {
+    style: "currency",
+    currency: "PHP",
+    minimumFractionDigits: 2,
+  }).format(Number(value) || 0);
+
+const formatCategory = (value) =>
+  String(value || "Other")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
 export default function ManageProducts() {
   const [products, setProducts] = useState([]);
   const [stall, setStall] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [visibilityFilter, setVisibilityFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
+  const [photo, setPhoto] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState("");
 
   useEffect(() => {
-    Promise.all([stallService.getMy(), productService.getAll({ limit: 100 })])
-      .then(([s, p]) => {
-        setStall(s.data);
-        const myStallId = s.data?.id;
-        setProducts(
-          (p.data?.data || []).filter((prod) => prod.stall_id === myStallId),
-        );
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    if (!photo) { setPhotoPreview(""); return; }
+    const url = URL.createObjectURL(photo);
+    setPhotoPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photo]);
+
+  const selectPhoto = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type) || file.size > 5 * 1024 * 1024) {
+      setErrors((current) => ({ ...current, image_url: "Choose a JPG, PNG, or WebP photo up to 5 MB." }));
+      return;
+    }
+    setPhoto(file);
+    setErrors((current) => ({ ...current, image_url: "" }));
+  };
+
+  const removePhoto = () => {
+    setPhoto(null);
+    setForm((current) => ({ ...current, image_url: "" }));
+    setErrors((current) => ({ ...current, image_url: "" }));
+  };
+  const [deletingId, setDeletingId] = useState(null);
+  const [togglingId, setTogglingId] = useState(null);
+
+  const loadProducts = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const stallResponse = await stallService.getMy();
+      const myStall = extractStall(stallResponse.data);
+      setStall(myStall);
+
+      if (!myStall?.id) {
+        setProducts([]);
+        return;
+      }
+
+      const productResponse = await productService.getAll({
+        stall_id: myStall.id,
+        limit: 100,
+        mine: true,
+      });
+      const records = extractProducts(productResponse.data)
+        .filter(
+          (product) =>
+            !product.stall_id ||
+            String(product.stall_id) === String(myStall.id),
+        )
+        .map(normalizeProduct);
+      setProducts(records);
+    } catch (requestError) {
+      setProducts([]);
+      setError(
+        requestError.response?.data?.error ||
+          "We couldn't load your products. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const filtered = products.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase()),
+  useEffect(() => {
+    loadProducts();
+  }, [loadProducts]);
+
+  const stallStatus = String(stall?.status || "").toLowerCase();
+  const canManageProducts = ["approved", "active"].includes(stallStatus);
+
+  const filteredProducts = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const filtered = products.filter((product) => {
+      const matchesSearch =
+        !query ||
+        [product.name, product.description, product.category]
+          .join(" ")
+          .toLowerCase()
+          .includes(query);
+      const matchesCategory =
+        categoryFilter === "all" || product.category === categoryFilter;
+      const matchesVisibility =
+        visibilityFilter === "all" ||
+        (visibilityFilter === "active"
+          ? product.is_active
+          : !product.is_active);
+      return matchesSearch && matchesCategory && matchesVisibility;
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "price-low") return a.price - b.price;
+      if (sortBy === "price-high") return b.price - a.price;
+      if (sortBy === "stock-low") return a.stock - b.stock;
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+  }, [categoryFilter, products, search, sortBy, visibilityFilter]);
+
+  const inventory = useMemo(
+    () => ({
+      active: products.filter((product) => product.is_active).length,
+      hidden: products.filter((product) => !product.is_active).length,
+      lowStock: products.filter(
+        (product) => product.stock > 0 && product.stock <= 5,
+      ).length,
+      outOfStock: products.filter((product) => product.stock === 0).length,
+      value: products.reduce(
+        (total, product) =>
+          total + Number(product.price || 0) * Number(product.stock || 0),
+        0,
+      ),
+    }),
+    [products],
   );
 
+  const closeModal = () => {
+    if (saving) return;
+    setModalOpen(false);
+    setEditTarget(null);
+    setErrors({});
+    setPhoto(null);
+  };
+
   const openCreate = () => {
-    if (!stall) return toast.error("You need an approved stall first");
-    if (stall.status !== "approved")
-      return toast.error("Your stall must be approved first");
+    if (!stall) {
+      toast.error("Create a seller stall before adding products");
+      return;
+    }
+    if (!canManageProducts) {
+      toast.error("Your stall must be approved before adding products");
+      return;
+    }
+
     setForm({ ...EMPTY_FORM, stall_id: stall.id });
+    setPhoto(null);
     setEditTarget(null);
     setErrors({});
     setModalOpen(true);
   };
 
   const openEdit = (product) => {
+    setPhoto(null);
     setForm({
       name: product.name,
       description: product.description || "",
-      price: product.price,
-      stock: product.stock,
+      price: String(product.price),
+      stock: String(product.stock),
       category: product.category,
       image_url: product.image_url || "",
-      stall_id: product.stall_id,
+      stall_id: product.stall_id || stall?.id || "",
     });
     setEditTarget(product);
     setErrors({});
@@ -87,300 +253,480 @@ export default function ManageProducts() {
   };
 
   const validate = () => {
-    const errs = {};
-    if (!form.name || form.name.length < 2) errs.name = "Name is required";
-    if (!form.price || Number(form.price) <= 0)
-      errs.price = "Valid price required";
-    if (form.stock === "" || Number(form.stock) < 0)
-      errs.stock = "Stock required (0 or more)";
-    return errs;
+    const nextErrors = {};
+    const name = form.name.trim();
+    const price = Number(form.price);
+    const stock = Number(form.stock);
+
+    if (name.length < 2) nextErrors.name = "Enter at least 2 characters.";
+    if (!Number.isFinite(price) || price <= 0) {
+      nextErrors.price = "Enter a price greater than zero.";
+    }
+    if (!Number.isInteger(stock) || stock < 0) {
+      nextErrors.stock = "Stock must be a whole number of 0 or more.";
+    }
+    if (!CATEGORIES.includes(form.category)) {
+      nextErrors.category = "Choose a valid category.";
+    }
+    if (errors.image_url) nextErrors.image_url = errors.image_url;
+
+    return nextErrors;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) return setErrors(errs);
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    const validationErrors = validate();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
 
     const payload = {
       ...form,
+      name: form.name.trim(),
+      description: form.description.trim(),
+      image_url: form.image_url.trim(),
       price: Number(form.price),
       stock: Number(form.stock),
+      stall_id: stall?.id || form.stall_id,
     };
 
     try {
       setSaving(true);
+      if (photo) {
+        const { data } = await productService.uploadPhoto(photo);
+        payload.image_url = data.image_url;
+        setForm((current) => ({ ...current, image_url: data.image_url }));
+        setPhoto(null);
+      }
       if (editTarget) {
-        const { data } = await productService.update(editTarget.id, payload);
-        setProducts((prev) =>
-          prev.map((p) => (p.id === editTarget.id ? data : p)),
+        const response = await productService.update(editTarget.id, payload);
+        const savedProduct = normalizeProduct({
+          ...editTarget,
+          ...payload,
+          ...extractProduct(response.data),
+        });
+        setProducts((current) =>
+          current.map((product) =>
+            product.id === editTarget.id ? savedProduct : product,
+          ),
         );
-        toast.success("Product updated!");
+        toast.success("Product updated");
       } else {
-        const { data } = await productService.create(payload);
-        setProducts((prev) => [data, ...prev]);
-        toast.success("Product created!");
+        const response = await productService.create(payload);
+        const savedProduct = normalizeProduct({
+          ...payload,
+          is_active: true,
+          ...extractProduct(response.data),
+        });
+        setProducts((current) => [savedProduct, ...current]);
+        toast.success("Product created");
       }
       setModalOpen(false);
-    } catch (err) {
-      toast.error(err.response?.data?.error || "Failed to save product");
+      setEditTarget(null);
+    } catch (requestError) {
+      toast.error(
+        requestError.response?.data?.error || "Failed to save product",
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Remove this product?")) return;
+  const handleDelete = async (product) => {
+    if (
+      !window.confirm(`Remove “${product.name}”? This action cannot be undone.`)
+    )
+      return;
+
     try {
-      setDeletingId(id);
-      await productService.remove(id);
-      setProducts((prev) => prev.filter((p) => p.id !== id));
+      setDeletingId(product.id);
+      await productService.remove(product.id);
+      setProducts((current) =>
+        current.filter((item) => item.id !== product.id),
+      );
       toast.success("Product removed");
-    } catch {
-      toast.error("Failed to remove product");
+    } catch (requestError) {
+      toast.error(
+        requestError.response?.data?.error || "Failed to remove product",
+      );
     } finally {
       setDeletingId(null);
     }
   };
 
   const handleToggleActive = async (product) => {
+    const nextActive = !product.is_active;
     try {
-      const { data } = await productService.update(product.id, {
-        is_active: !product.is_active,
+      setTogglingId(product.id);
+      const response = await productService.update(product.id, {
+        is_active: nextActive,
       });
-      setProducts((prev) =>
-        prev.map((p) =>
-          p.id === product.id ? { ...p, is_active: data.is_active } : p,
+      const result = extractProduct(response.data);
+      const savedActive = result.is_active ?? nextActive;
+      setProducts((current) =>
+        current.map((item) =>
+          item.id === product.id ? { ...item, is_active: savedActive } : item,
         ),
       );
-      toast.success(
-        data.is_active ? "Product is now visible" : "Product hidden",
+      toast.success(savedActive ? "Product is now visible" : "Product hidden");
+    } catch (requestError) {
+      toast.error(
+        requestError.response?.data?.error || "Failed to update product",
       );
-    } catch {
-      toast.error("Failed to update product");
+    } finally {
+      setTogglingId(null);
     }
   };
 
-  const handleChange = (e) => {
-    setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
-    setErrors((prev) => ({ ...prev, [e.target.name]: "" }));
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+    setForm((current) => ({ ...current, [name]: value }));
+    if (errors[name]) {
+      setErrors((current) => ({ ...current, [name]: "" }));
+    }
   };
 
-  const fmt = (p) =>
-    `₱${Number(p).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
+  const clearFilters = () => {
+    setSearch("");
+    setCategoryFilter("all");
+    setVisibilityFilter("all");
+  };
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout manage-products-shell">
       <Sidebar />
+
       <main className="dashboard-main">
-        <div className="topbar">
+        <header className="topbar">
           <div className="topbar-left">
             <div className="topbar-titles">
               <h1>Manage Products</h1>
-              <p>Add, edit, and manage your product listings.</p>
+              <p>Keep your catalog accurate, visible, and ready for buyers.</p>
             </div>
           </div>
-        </div>
+          <button
+            type="button"
+            className="btn btn-primary manage-products-add-top"
+            onClick={openCreate}
+            disabled={loading || !canManageProducts}
+          >
+            <FiPlus /> Add product
+          </button>
+        </header>
 
-        <div className="dashboard-content">
-          {/* Toolbar */}
-          <div className="toolbar">
-            <div style={{ position: "relative", flex: 1, maxWidth: 340 }}>
-              <FiSearch
-                style={{
-                  position: "absolute",
-                  left: 12,
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  color: "var(--gray-400)",
-                }}
-              />
-              <input
-                className="form-input"
-                placeholder="Search products..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                style={{ paddingLeft: "2.5rem" }}
-              />
+        <div className="dashboard-content manage-products-content">
+          {stall?.plan && <p className="card" style={{ padding: "1rem" }}>{stall.plan.name} plan · {products.length} / {stall.plan.listing_limit} listings · POS included{stall.plan.analytics ? " · Product analytics and landing-page advertising included" : " · Contact the campus administrator for Premium analytics and advertising"}</p>}
+          {!loading && stall && !canManageProducts && (
+            <div className="manage-products-notice" role="status">
+              <FiAlertCircle />
+              <div>
+                <strong>
+                  Your stall is {formatCategory(stallStatus || "pending")}
+                </strong>
+                <p>
+                  You can manage existing listings after an administrator
+                  approves your stall.
+                </p>
+              </div>
             </div>
-            <button className="btn btn-primary" onClick={openCreate}>
-              <FiPlus /> Add Product
-            </button>
-          </div>
+          )}
 
-          {/* Products table */}
+          {error && (
+            <div className="manage-products-error" role="alert">
+              <FiAlertCircle />
+              <span>{error}</span>
+              <button type="button" onClick={loadProducts}>
+                Retry
+              </button>
+            </div>
+          )}
+
+          <section
+            className="manage-products-summary"
+            aria-label="Inventory summary"
+          >
+            <article>
+              <span className="tone-green">
+                <FiPackage />
+              </span>
+              <div>
+                <small>Total products</small>
+                <strong>{loading ? "—" : products.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="tone-blue">
+                <FiEye />
+              </span>
+              <div>
+                <small>Visible</small>
+                <strong>{loading ? "—" : inventory.active}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="tone-orange">
+                <FiTrendingDown />
+              </span>
+              <div>
+                <small>Low or out of stock</small>
+                <strong>
+                  {loading ? "—" : inventory.lowStock + inventory.outOfStock}
+                </strong>
+              </div>
+            </article>
+            <article>
+              <span className="tone-gold">₱</span>
+              <div>
+                <small>Inventory value</small>
+                <strong>
+                  {loading ? "—" : formatCurrency(inventory.value)}
+                </strong>
+              </div>
+            </article>
+          </section>
+
+          {!loading && products.length > 0 && (
+            <section
+              className="manage-products-toolbar"
+              aria-label="Product filters"
+            >
+              <label className="manage-products-search">
+                <FiSearch />
+                <input
+                  type="search"
+                  placeholder="Search products"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    aria-label="Clear search"
+                  >
+                    <FiX />
+                  </button>
+                )}
+              </label>
+
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                aria-label="Filter by category"
+              >
+                <option value="all">All categories</option>
+                {CATEGORIES.map((category) => (
+                  <option key={category} value={category}>
+                    {formatCategory(category)}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={visibilityFilter}
+                onChange={(event) => setVisibilityFilter(event.target.value)}
+                aria-label="Filter by visibility"
+              >
+                <option value="all">All visibility</option>
+                <option value="active">Visible</option>
+                <option value="hidden">Hidden</option>
+              </select>
+
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+                aria-label="Sort products"
+              >
+                <option value="newest">Newest first</option>
+                <option value="name">Name A–Z</option>
+                <option value="price-low">Lowest price</option>
+                <option value="price-high">Highest price</option>
+                <option value="stock-low">Lowest stock</option>
+              </select>
+            </section>
+          )}
+
           {loading ? (
             <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "0.75rem",
-              }}
+              className="manage-products-skeleton"
+              aria-label="Loading products"
             >
-              {[1, 2, 3, 4, 5].map((i) => (
-                <div
-                  key={i}
-                  className="skeleton"
-                  style={{ height: 64, borderRadius: 10 }}
-                />
+              {Array.from({ length: 5 }).map((_, index) => (
+                <i key={index} />
               ))}
             </div>
-          ) : filtered.length === 0 ? (
-            <EmptyState
-              icon="📦"
-              title="No products yet"
-              description={
-                stall?.status === "approved"
-                  ? "Add your first product to start selling"
-                  : "Get your stall approved first"
-              }
-              action={
-                stall?.status === "approved" && (
-                  <button className="btn btn-primary" onClick={openCreate}>
-                    <FiPlus /> Add Product
-                  </button>
-                )
-              }
-            />
+          ) : error ? null : products.length === 0 ? (
+            <section className="manage-products-empty">
+              <span>
+                <FiPackage />
+              </span>
+              <small>
+                {canManageProducts
+                  ? "Start your catalog"
+                  : "Stall approval required"}
+              </small>
+              <h2>
+                {canManageProducts
+                  ? "Add your first product"
+                  : "Products are not available yet"}
+              </h2>
+              <p>
+                {canManageProducts
+                  ? "Create a clear product listing with its price, stock, category, and image."
+                  : "Once your stall is approved, you can begin adding products for campus buyers."}
+              </p>
+              {canManageProducts && (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={openCreate}
+                >
+                  <FiPlus /> Add product
+                </button>
+              )}
+            </section>
+          ) : filteredProducts.length === 0 ? (
+            <section className="manage-products-empty compact">
+              <span>
+                <FiSearch />
+              </span>
+              <h2>No matching products</h2>
+              <p>Try another keyword or clear the current filters.</p>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={clearFilters}
+              >
+                Clear filters
+              </button>
+            </section>
           ) : (
-            <div className="card">
-              <div className="products-table-wrap">
-                <table className="products-table">
+            <section className="manage-products-panel">
+              <div className="manage-products-panel-heading">
+                <div>
+                  <small>Product catalog</small>
+                  <h2>
+                    {filteredProducts.length} product
+                    {filteredProducts.length === 1 ? "" : "s"}
+                  </h2>
+                </div>
+                <span>{inventory.hidden} hidden</span>
+              </div>
+
+              <div className="manage-products-table-wrap">
+                <table className="manage-products-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 56 }}>Image</th>
-                      <th>Name</th>
+                      <th>Product</th>
                       <th>Category</th>
                       <th>Price</th>
                       <th>Stock</th>
-                      <th>Status</th>
-                      <th style={{ textAlign: "right" }}>Actions</th>
+                      <th>Visibility</th>
+                      <th>
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((product) => (
+                    {filteredProducts.map((product) => (
                       <tr key={product.id}>
-                        <td>
-                          <div className="product-thumb">
-                            {product.image_url ? (
-                              <img src={product.image_url} alt={product.name} />
-                            ) : (
-                              <span>📦</span>
-                            )}
+                        <td data-label="Product">
+                          <div className="manage-product-identity">
+                            <div className="manage-product-thumb">
+                              {product.image_url ? (
+                                <img
+                                  src={product.image_url}
+                                  alt=""
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <FiImage />
+                              )}
+                            </div>
+                            <div>
+                              <strong title={product.name}>
+                                {product.name}
+                              </strong>
+                              <small title={product.description}>
+                                {product.description || "No description"}
+                              </small>
+                            </div>
                           </div>
                         </td>
-                        <td>
-                          <p
-                            className="font-medium"
-                            style={{
-                              fontSize: "0.875rem",
-                              maxWidth: 200,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {product.name}
-                          </p>
-                          {product.description && (
-                            <p
-                              className="text-xs text-muted"
-                              style={{
-                                maxWidth: 200,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {product.description}
-                            </p>
-                          )}
-                        </td>
-                        <td>
+                        <td data-label="Category">
                           <span
-                            className={`badge cat-badge cat-${product.category}`}
-                            style={{ textTransform: "capitalize" }}
+                            className={`manage-product-category cat-${product.category}`}
                           >
-                            {product.category}
+                            {formatCategory(product.category)}
                           </span>
                         </td>
-                        <td
-                          className="font-semibold"
-                          style={{ color: "var(--color-primary)" }}
-                        >
-                          {fmt(product.price)}
+                        <td data-label="Price">
+                          <strong className="manage-product-price">
+                            {formatCurrency(product.price)}
+                          </strong>
                         </td>
-                        <td>
+                        <td data-label="Stock">
                           <span
-                            className={
-                              product.stock === 0 ? "text-danger" : "text-muted"
-                            }
-                            style={{
-                              fontSize: "0.875rem",
-                              fontWeight: product.stock <= 5 ? 600 : 400,
-                            }}
+                            className={`manage-product-stock ${product.stock === 0 ? "out" : product.stock <= 5 ? "low" : ""}`}
                           >
-                            {product.stock}{" "}
-                            {product.stock <= 5 && product.stock > 0
-                              ? "⚠️"
-                              : ""}
+                            {product.stock === 0
+                              ? "Out of stock"
+                              : `${product.stock} in stock`}
                           </span>
                         </td>
-                        <td>
+                        <td data-label="Visibility">
                           <span
-                            className={`badge ${product.is_active ? "badge-success" : "badge-gray"}`}
+                            className={`manage-product-visibility ${product.is_active ? "active" : "hidden"}`}
                           >
-                            {product.is_active ? "Active" : "Hidden"}
+                            <i /> {product.is_active ? "Visible" : "Hidden"}
                           </span>
                         </td>
-                        <td>
-                          <div className="action-row">
+                        <td data-label="Actions">
+                          <div className="manage-product-actions">
                             <button
-                              className="btn btn-ghost btn-icon"
+                              type="button"
                               onClick={() => handleToggleActive(product)}
+                              disabled={togglingId === product.id}
                               title={
                                 product.is_active
                                   ? "Hide product"
                                   : "Show product"
                               }
-                              style={{
-                                color: product.is_active
-                                  ? "var(--color-warning)"
-                                  : "var(--color-success)",
-                              }}
+                              aria-label={
+                                product.is_active
+                                  ? `Hide ${product.name}`
+                                  : `Show ${product.name}`
+                              }
                             >
-                              {product.is_active ? (
-                                <FiEyeOff size={15} />
+                              {togglingId === product.id ? (
+                                <span className="manage-products-mini-spinner" />
+                              ) : product.is_active ? (
+                                <FiEyeOff />
                               ) : (
-                                <FiEye size={15} />
+                                <FiEye />
                               )}
                             </button>
                             <button
-                              className="btn btn-ghost btn-icon"
+                              type="button"
                               onClick={() => openEdit(product)}
-                              title="Edit"
-                              style={{ color: "var(--color-info)" }}
+                              title="Edit product"
+                              aria-label={`Edit ${product.name}`}
                             >
-                              <FiEdit2 size={15} />
+                              <FiEdit2 />
                             </button>
                             <button
-                              className="btn btn-ghost btn-icon"
-                              onClick={() => handleDelete(product.id)}
+                              type="button"
+                              className="danger"
+                              onClick={() => handleDelete(product)}
                               disabled={deletingId === product.id}
-                              title="Delete"
-                              style={{ color: "var(--color-danger)" }}
+                              title="Delete product"
+                              aria-label={`Delete ${product.name}`}
                             >
                               {deletingId === product.id ? (
-                                <span
-                                  className="spinner"
-                                  style={{
-                                    width: 14,
-                                    height: 14,
-                                    borderWidth: 2,
-                                    borderTopColor: "var(--color-danger)",
-                                  }}
-                                />
+                                <span className="manage-products-mini-spinner" />
                               ) : (
-                                <FiTrash2 size={15} />
+                                <FiTrash2 />
                               )}
                             </button>
                           </div>
@@ -390,211 +736,161 @@ export default function ManageProducts() {
                   </tbody>
                 </table>
               </div>
-              <div
-                style={{
-                  padding: "0.875rem 1.25rem",
-                  borderTop: "1px solid var(--gray-100)",
-                }}
-              >
-                <p className="text-sm text-muted">
-                  {filtered.length} product{filtered.length !== 1 ? "s" : ""}
-                </p>
-              </div>
-            </div>
+            </section>
           )}
         </div>
       </main>
 
-      {/* Product form modal */}
       <Modal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={closeModal}
         title={editTarget ? "Edit Product" : "Add New Product"}
-        maxWidth={560}
+        maxWidth={580}
       >
         <form
+          className="manage-product-form"
           onSubmit={handleSubmit}
-          style={{ display: "flex", flexDirection: "column", gap: "1.1rem" }}
+          noValidate
         >
-          <div className="form-group">
-            <label className="form-label">Product name *</label>
+          <div className="manage-product-field">
+            <label htmlFor="product-name">
+              Product name <span>*</span>
+            </label>
             <input
-              className={`form-input ${errors.name ? "error" : ""}`}
+              id="product-name"
+              className={errors.name ? "is-invalid" : ""}
               name="name"
               value={form.name}
               onChange={handleChange}
-              placeholder="e.g. Pork Sinigang Meal"
+              placeholder="e.g. Adobong Rice Bucket"
+              maxLength={100}
             />
-            {errors.name && <p className="form-error">{errors.name}</p>}
+            {errors.name && <small>{errors.name}</small>}
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Description</label>
+          <div className="manage-product-field">
+            <label htmlFor="product-description">Description</label>
             <textarea
-              className="form-input"
+              id="product-description"
               name="description"
               value={form.description}
               onChange={handleChange}
-              placeholder="Describe your product..."
-              rows={3}
-              style={{ resize: "vertical" }}
+              placeholder="What should buyers know about this product?"
+              rows={4}
+              maxLength={600}
             />
+            <span className="manage-product-character-count">
+              {form.description.length}/600
+            </span>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: "1rem",
-            }}
-          >
-            <div className="form-group">
-              <label className="form-label">Price (₱) *</label>
+          <div className="manage-product-form-grid">
+            <div className="manage-product-field">
+              <label htmlFor="product-price">
+                Price (₱) <span>*</span>
+              </label>
               <input
-                className={`form-input ${errors.price ? "error" : ""}`}
+                id="product-price"
+                className={errors.price ? "is-invalid" : ""}
                 name="price"
                 type="number"
-                min="0"
+                min="0.01"
                 step="0.01"
                 value={form.price}
                 onChange={handleChange}
                 placeholder="0.00"
               />
-              {errors.price && <p className="form-error">{errors.price}</p>}
+              {errors.price && <small>{errors.price}</small>}
             </div>
-            <div className="form-group">
-              <label className="form-label">Stock *</label>
+            <div className="manage-product-field">
+              <label htmlFor="product-stock">
+                Available stock <span>*</span>
+              </label>
               <input
-                className={`form-input ${errors.stock ? "error" : ""}`}
+                id="product-stock"
+                className={errors.stock ? "is-invalid" : ""}
                 name="stock"
                 type="number"
                 min="0"
+                step="1"
                 value={form.stock}
                 onChange={handleChange}
                 placeholder="0"
               />
-              {errors.stock && <p className="form-error">{errors.stock}</p>}
+              {errors.stock && <small>{errors.stock}</small>}
             </div>
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Category *</label>
+          <div className="manage-product-field">
+            <label htmlFor="product-category">
+              Category <span>*</span>
+            </label>
             <select
-              className="form-input form-select"
+              id="product-category"
               name="category"
               value={form.category}
               onChange={handleChange}
             >
-              {CATEGORIES.map((c) => (
-                <option
-                  key={c}
-                  value={c}
-                  style={{ textTransform: "capitalize" }}
-                >
-                  {c.charAt(0).toUpperCase() + c.slice(1).replace("-", " ")}
+              {CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {formatCategory(category)}
                 </option>
               ))}
             </select>
+            {errors.category && <small>{errors.category}</small>}
           </div>
 
-          <div className="form-group">
-            <label className="form-label">Image URL</label>
+          <div className="manage-product-field">
+            <label htmlFor="product-image">Product photo</label>
             <input
-              className="form-input"
-              name="image_url"
-              value={form.image_url}
-              onChange={handleChange}
-              placeholder="https://..."
+              id="product-image"
+              className={errors.image_url ? "is-invalid" : ""}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={selectPhoto}
+              disabled={saving}
+              aria-describedby="product-photo-help product-photo-error"
+              aria-invalid={Boolean(errors.image_url)}
             />
-            {form.image_url && (
-              <img
-                src={form.image_url}
-                alt="Preview"
-                style={{
-                  marginTop: 8,
-                  width: 80,
-                  height: 80,
-                  objectFit: "cover",
-                  borderRadius: 8,
-                  border: "1px solid var(--gray-200)",
-                }}
-                onError={(e) => {
-                  e.target.style.display = "none";
-                }}
-              />
+            <span id="product-photo-help" className="manage-product-photo-help">Choose a photo from your device. JPG, PNG, or WebP, up to 5 MB.</span>
+            <small id="product-photo-error" role="alert">{errors.image_url}</small>
+            {(photoPreview || form.image_url) && (
+              <div className="manage-product-image-preview">
+                <img
+                  key={photoPreview || form.image_url}
+                  src={photoPreview || form.image_url}
+                  alt="Product preview"
+                />
+                <span>{photo?.name || "Current product photo"}</span>
+                <button type="button" onClick={removePhoto} disabled={saving} aria-label="Remove product photo"><FiTrash2 /> Remove</button>
+              </div>
             )}
+            {errors.image_url && <button type="button" onClick={removePhoto} disabled={saving}>Clear photo selection</button>}
           </div>
 
-          <div
-            style={{ display: "flex", gap: "0.75rem", paddingTop: "0.5rem" }}
-          >
+          <div className="manage-product-form-actions">
             <button
-              className="btn btn-primary"
-              type="submit"
-              style={{ flex: 1 }}
+              type="button"
+              className="btn btn-ghost"
+              onClick={closeModal}
               disabled={saving}
             >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
               {saving ? (
                 <>
                   <span className="spinner" /> Saving...
                 </>
               ) : editTarget ? (
-                "Save Changes"
+                "Save changes"
               ) : (
-                "Add Product"
+                "Add product"
               )}
-            </button>
-            <button
-              className="btn btn-ghost"
-              type="button"
-              onClick={() => setModalOpen(false)}
-            >
-              Cancel
             </button>
           </div>
         </form>
       </Modal>
-
-      <style>{`
-        .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem; }
-        .products-table-wrap { overflow-x: auto; }
-        .products-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-        .products-table th {
-          text-align: left; padding: 0.75rem 1rem;
-          color: var(--gray-500); font-weight: 600; font-size: 0.75rem;
-          text-transform: uppercase; letter-spacing: 0.04em;
-          border-bottom: 1px solid var(--gray-200); background: var(--gray-50);
-        }
-        .products-table td { padding: 0.875rem 1rem; border-bottom: 1px solid var(--gray-100); vertical-align: middle; }
-        .products-table tr:last-child td { border-bottom: none; }
-        .products-table tr:hover td { background: var(--gray-50); }
-        .product-thumb {
-          width: 44px; height: 44px; border-radius: var(--radius-md);
-          overflow: hidden; background: var(--gray-100);
-          display: flex; align-items: center; justify-content: center;
-          font-size: 1.25rem;
-        }
-        .product-thumb img { width: 100%; height: 100%; object-fit: cover; }
-        .action-row { display: flex; align-items: center; gap: 0.25rem; justify-content: flex-end; }
-
-        /* .btn-icon was used throughout but never defined — buttons were
-           inheriting .btn's full padding instead of being compact squares */
-        .btn-icon { padding: 0.4rem; width: 30px; height: 30px; border-radius: var(--radius-md); }
-
-        /* form-input.error was applied on validation failure but had no
-           visual effect — border stayed neutral gray even when invalid */
-        .form-input.error { border-color: var(--color-danger); }
-        .form-input.error:focus { box-shadow: 0 0 0 3px var(--color-danger-light); }
-
-        .cat-badge { text-transform: capitalize; font-size: 0.7rem; }
-        .cat-food        { background: #FEF9C3; color: #92400E; }
-        .cat-clothing    { background: #EDE9FE; color: #5B21B6; }
-        .cat-electronics { background: #DBEAFE; color: #1E40AF; }
-        .cat-accessories { background: #FCE7F3; color: #9D174D; }
-        .cat-student-made{ background: var(--cm-secondary-light); color: #15803D; }
-        .cat-other       { background: var(--gray-100); color: var(--gray-700); }
-        .text-danger { color: var(--color-danger); }
-      `}</style>
     </div>
   );
 }

@@ -8,7 +8,7 @@ export default function AuthLayout({ children, title, subtitle }) {
         <div className="auth-brand-panel">
           <Link to="/" className="auth-logo-link">
             <img
-              src="/logo.png"
+              src="/images/buyer/campusmarket-logo.png"
               alt="Campus Market"
               className="auth-logo-img"
             />
@@ -17,7 +17,7 @@ export default function AuthLayout({ children, title, subtitle }) {
 
           <div className="auth-brand-illustration">
             <img
-              src="/student.png"
+              src="/images/student.png"
               alt="Two students shopping on Campus Market"
               className="auth-illustration-img"
             />

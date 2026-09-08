@@ -1,0 +1,6 @@
+{
+  "watch": ["src"],
+  "ext": "js",
+  "ignore": ["src/data/market-data.json", "src/data/*.tmp"],
+  "delay": "300ms"
+}

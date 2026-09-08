@@ -4,9 +4,21 @@ import { eventStore } from "../data/marketStore.js";
 export const getEvents = async (_req, res, next) => {
   try {
     const events = await eventStore.listEvents();
+
     res.json(events);
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/events/:eventId
+export const getEvent = async (req, res, next) => {
+  try {
+    const event = await eventStore.getById(req.params.eventId);
+
+    res.json(event);
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -14,9 +26,10 @@ export const getEvents = async (_req, res, next) => {
 export const getEventStalls = async (req, res, next) => {
   try {
     const stalls = await eventStore.listStallsForEvent(req.params.eventId);
+
     res.json(stalls);
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -27,21 +40,46 @@ export const submitSellerApplication = async (req, res, next) => {
       req.user.id,
       req.body,
     );
-    res
-      .status(201)
-      .json({ message: "Application submitted successfully!", application });
-  } catch (err) {
-    next(err);
+
+    res.status(201).json({
+      message: "Application submitted successfully!",
+      application,
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
-// GET /api/seller-applications (admin review)
+// GET /api/seller-applications/my
+export const getMySellerApplications = async (req, res, next) => {
+  try {
+    const { eventId, status } = req.query;
+
+    const applications = await eventStore.listApplications({
+      eventId,
+      status,
+      sellerId: req.user.id,
+    });
+
+    res.json(applications);
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/seller-applications
+// Admin-only application review
 export const getSellerApplications = async (req, res, next) => {
   try {
     const { eventId, status } = req.query;
-    const applications = await eventStore.listApplications({ eventId, status });
+
+    const applications = await eventStore.listApplications({
+      eventId,
+      status,
+    });
+
     res.json(applications);
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 };
