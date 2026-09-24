@@ -897,6 +897,45 @@ export const messageStore = {
 };
 
 export const eventStore = {
+  async saveEvent(payload, actorId) {
+    const current = ensureState();
+    const name = String(payload.name || "").trim();
+    const location = String(payload.location || "").trim();
+    if (!name || name.length > 120 || !location || location.length > 200 || !/^\d{4}-\d{2}-\d{2}$/.test(payload.date || "") || !Number.isFinite(Date.parse(payload.date))) fail("Provide an event name, location and valid date.");
+    if (new Date(payload.date).toISOString().slice(0, 10) !== payload.date) fail("Provide a valid calendar date.");
+    const event = { id: randomUUID(), name, location, date: payload.date, description: String(payload.description || "").slice(0, 2000), created_at: new Date().toISOString() };
+    current.events.push(event);
+    current.auditLog.push({ id: randomUUID(), actor_id: actorId, action: "event.created", target_id: event.id, created_at: event.created_at });
+    saveState();
+    return clone(event);
+  },
+
+  async saveLayout(eventId, payload, actorId) {
+    const current = ensureState();
+    const event = current.events.find((item) => String(item.id) === String(eventId));
+    if (!event) fail("Event not found", 404);
+    if ((event.layout_version || 0) !== payload.version) fail("This layout changed. Reload before saving.", 409);
+    if (!Array.isArray(payload.stalls) || payload.stalls.length > 200) fail("A layout supports up to 200 spaces.");
+    const existing = current.eventStalls.filter((item) => String(item.event_id) === String(eventId));
+    const numbers = new Set();
+    const ids = new Set();
+    const next = payload.stalls.map((item) => {
+      const prior = existing.find((entry) => entry.id === item.id);
+      if (!Number.isInteger(item.stall_number) || item.stall_number < 1 || numbers.has(item.stall_number)) fail("Stall numbers must be positive and unique.");
+      if (ids.has(item.id)) fail("Duplicate space ID.");
+      ids.add(item.id); numbers.add(item.stall_number);
+      if ((!['food', 'merchandise', 'mixed'].includes(item.category) && item.category !== prior?.category) || (!['available', 'reserved', 'occupied'].includes(item.status) && item.status !== prior?.status)) fail("Invalid category or status.");
+      if (typeof item.price !== "number" || !Number.isFinite(item.price) || item.price < 0 || item.price > 1000000 || !String(item.size || "").trim() || String(item.size).length > 40) fail("Provide a size and valid non-negative price.");
+      if (prior?.seller_id && item.status !== prior.status) fail("Assigned spaces cannot change status in the layout editor.", 409);
+      return { ...prior, id: prior?.id || randomUUID(), event_id: event.id, stall_number: item.stall_number, category: item.category, status: item.status, size: item.size.trim(), price: item.price };
+    });
+    if (existing.some((item) => !ids.has(item.id))) fail("Existing spaces cannot be removed from this editor.");
+    current.eventStalls = [...current.eventStalls.filter((item) => String(item.event_id) !== String(eventId)), ...next];
+    event.layout_version = (event.layout_version || 0) + 1;
+    current.auditLog.push({ id: randomUUID(), actor_id: actorId, action: "event.layout_saved", target_id: event.id, created_at: new Date().toISOString() });
+    saveState();
+    return { event: clone(event), stalls: clone(next) };
+  },
   async listEvents() {
     const current = ensureState();
 
@@ -1288,7 +1327,8 @@ export const adminStore = {
       (stall) => stall.status === "approved",
     ).length;
     const total_orders = current.orders.length;
-    const total_revenue = current.orders.reduce(
+    const completed = current.orders.filter((order) => ["completed", "delivered"].includes(order.status));
+    const total_revenue = completed.reduce(
       (sum, order) => sum + Number(order.total),
       0,
     );
@@ -1298,6 +1338,14 @@ export const adminStore = {
       total_orders,
       total_revenue: Number(total_revenue.toFixed(2)),
       total_interactions: current.behavior.length,
+      total_events: current.events.length,
+      completed_orders: completed.length,
+      user_breakdown: ["buyer", "seller", "admin"].map((role) => ({ name: role, value: current.users.filter((user) => user.role === role).length })),
+      sales_history: Array.from({ length: 6 }, (_, index) => {
+        const date = new Date(); date.setUTCDate(1); date.setUTCMonth(date.getUTCMonth() - 5 + index);
+        const month = date.toISOString().slice(0, 7);
+        return { month, sales: completed.filter((order) => String(order.created_at).startsWith(month)).reduce((sum, order) => sum + Number(order.total), 0) };
+      }),
     };
   },
 

@@ -4,6 +4,8 @@ import Sidebar from "../../components/common/Sidebar.jsx";
 import { StatCard } from "../../components/common/Ui.jsx";
 import { adminService, stallService } from "../../services/api.js";
 import toast from "react-hot-toast";
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from "recharts";
+import "./AdminWorkspace.css";
 import {
   FiUsers,
   FiShoppingBag,
@@ -19,15 +21,17 @@ export default function AdminDashboard() {
   const [pendingStalls, setPendingStalls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [approvingId, setApprovingId] = useState(null);
+  const [error, setError] = useState(false);
 
   const fetchData = () => {
     setLoading(true);
+    setError(false);
     Promise.all([adminService.getStats(), adminService.getPendingStalls()])
       .then(([s, p]) => {
         setStats(s.data);
         setPendingStalls(p.data || []);
       })
-      .catch(() => toast.error("Failed to load dashboard"))
+      .catch(() => { setError(true); toast.error("Failed to load dashboard"); })
       .finally(() => setLoading(false));
   };
 
@@ -39,7 +43,7 @@ export default function AdminDashboard() {
       await stallService.updateStatus(stallId, status);
       setPendingStalls((prev) => prev.filter((s) => s.id !== stallId));
       toast.success(`Stall ${status} successfully`);
-      adminService.getStats().then(({ data }) => setStats(data));
+      adminService.getStats().then(({ data }) => setStats(data)).catch(() => toast.error("Stall updated, but dashboard totals could not refresh."));
     } catch {
       toast.error("Failed to update stall");
     } finally {
@@ -51,7 +55,7 @@ export default function AdminDashboard() {
     `₱${Number(p).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`;
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout admin-shell">
       <Sidebar />
       <main className="dashboard-main">
         <div className="topbar">
@@ -64,6 +68,7 @@ export default function AdminDashboard() {
         </div>
 
         <div className="dashboard-content">
+          {error && <div role="alert" className="card admin-panel"><p>Dashboard data could not be loaded.</p><button className="btn btn-outline" onClick={fetchData}>Retry</button></div>}
           <div className="dashboard-hero">
             <div className="hero-card card">
               <div className="hero-card-inner">
@@ -83,6 +88,7 @@ export default function AdminDashboard() {
                   <Link to="/admin/users" className="btn btn-ghost">
                     Manage users
                   </Link>
+                  <Link to="/admin/events" className="btn btn-ghost">Events & stall maps</Link>
                 </div>
               </div>
             </div>
@@ -99,30 +105,34 @@ export default function AdminDashboard() {
           <div className="stats-grid" style={{ marginBottom: "1.75rem" }}>
             <StatCard
               label="Total Users"
-              value={loading ? "—" : stats?.total_users?.toLocaleString() || 0}
+              value={loading || error ? "—" : stats?.total_users?.toLocaleString() || 0}
               icon={<FiUsers />}
               color="info"
             />
             <StatCard
               label="Active Stalls"
-              value={loading ? "—" : stats?.active_stalls || 0}
+              value={loading || error ? "—" : stats?.active_stalls || 0}
               icon={<FiShoppingBag />}
               color="green"
             />
             <StatCard
-              label="Total Orders"
-              value={loading ? "—" : stats?.total_orders?.toLocaleString() || 0}
+              label="Total Events"
+              value={loading || error ? "—" : stats?.total_events?.toLocaleString() || 0}
               icon={<FiActivity />}
               color="gold"
             />
             <StatCard
-              label="Total Revenue"
-              value={loading ? "—" : fmt(stats?.total_revenue || 0)}
+              label="Completed Order Sales"
+              value={loading || error ? "—" : fmt(stats?.total_revenue || 0)}
               icon={<FiDollarSign />}
               color="gray"
             />
           </div>
 
+          {!loading && !error && <div className="admin-charts">
+            <section className="card admin-chart"><h2>Sales overview</h2><p>Last six calendar months · completed and delivered online orders · PHP</p><ResponsiveContainer width="100%" height={240}><BarChart data={stats?.sales_history || []}><XAxis dataKey="month" tick={{ fontSize: 11 }} /><YAxis tick={{ fontSize: 11 }} width={65} /><Tooltip formatter={(value) => fmt(value)} /><Bar dataKey="sales" name="Sales" fill="#167342" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>{!stats?.sales_history?.some((month) => month.sales > 0) && <p>No completed sales in this period.</p>}</section>
+            <section className="card admin-chart"><h2>User breakdown</h2><p>{stats?.total_users || 0} registered accounts · all time</p>{stats?.total_users > 0 && <ResponsiveContainer width="100%" height={220}><PieChart><Pie data={stats?.user_breakdown || []} dataKey="value" nameKey="name" innerRadius={60} outerRadius={90}>{["#167342", "#287ec1", "#9270bd"].map((color) => <Cell key={color} fill={color} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer>}<div className="admin-breakdown">{stats?.user_breakdown?.map((item, index) => <span key={item.name}><i style={{ background: ["#167342", "#287ec1", "#9270bd"][index] }} />{item.name}: {item.value} ({stats.total_users ? Math.round(item.value / stats.total_users * 100) : 0}%)</span>)}</div></section>
+          </div>}
           <div className="admin-grid">
             {/* Pending stall approvals */}
             <div className="card">
@@ -143,7 +153,7 @@ export default function AdminDashboard() {
                 </Link>
               </div>
 
-              {loading ? (
+              {error ? <p role="status" style={{ padding: "1.25rem" }}>Approval queue unavailable. Retry loading above.</p> : loading ? (
                 <div
                   style={{
                     padding: "0 1.25rem 1.25rem",
@@ -215,7 +225,7 @@ export default function AdminDashboard() {
                           onClick={() =>
                             handleStallAction(stall.id, "approved")
                           }
-                          disabled={approvingId === stall.id}
+                          disabled={approvingId !== null}
                         >
                           {approvingId === stall.id ? (
                             <span
@@ -233,7 +243,7 @@ export default function AdminDashboard() {
                           onClick={() =>
                             handleStallAction(stall.id, "rejected")
                           }
-                          disabled={approvingId === stall.id}
+                          disabled={approvingId !== null}
                         >
                           <FiX size={13} /> Reject
                         </button>
@@ -307,12 +317,12 @@ export default function AdminDashboard() {
                       : stats?.total_interactions?.toLocaleString() || 0,
                   },
                   {
-                    label: "Avg order value",
+                    label: "Avg completed order value",
                     value: loading
                       ? "—"
                       : fmt(
                           (stats?.total_revenue || 0) /
-                            Math.max(stats?.total_orders || 1, 1),
+                            Math.max(stats?.completed_orders || 1, 1),
                         ),
                   },
                   {

@@ -106,7 +106,7 @@ export default function Sidebar({ open, isOpen: legacyOpen, onClose }) {
         <Menu size={20} />
       </button>
 
-      <aside className={`cm-sidebar ${isOpen ? "cm-sidebar--open" : ""}`}>
+      <aside className={`cm-sidebar cm-sidebar--${role} ${isOpen ? "cm-sidebar--open" : ""}`}>
         <div className="cm-sidebar-brand">
           <Link
             to={homePath}
@@ -122,7 +122,7 @@ export default function Sidebar({ open, isOpen: legacyOpen, onClose }) {
             ) : (
               <>
                 <span className="cm-sidebar-logo-mark">
-                  <img src="/logo.png" alt="" />
+                  <img src="/images/logo.png" alt="" />
                 </span>
                 <span className="cm-sidebar-brand-copy">
                   <strong>Campus Market</strong>
@@ -189,7 +189,7 @@ export default function Sidebar({ open, isOpen: legacyOpen, onClose }) {
             <ShieldCheck size={15} />
             <span>
               <strong>Secure workspace</strong>
-              <small>Your seller data is protected</small>
+              <small>{role === "admin" ? "Campus Market administration" : "Your account data is protected"}</small>
             </span>
           </div>
           <button

@@ -1,3 +1,4 @@
+import "./AdminWorkspace.css";
 import { useState, useEffect } from "react";
 import Sidebar from "../../components/common/Sidebar.jsx";
 import { EmptyState } from "../../components/common/Ui.jsx";
@@ -70,7 +71,7 @@ export default function ManageStalls() {
       : stalls.filter((s) => s.status === tab).length;
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout admin-shell">
       <Sidebar />
       <main className="dashboard-main">
         <div className="topbar">

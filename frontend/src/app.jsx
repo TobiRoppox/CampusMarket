@@ -39,6 +39,7 @@ import Settings from "./pages/seller/Settings.jsx";
 import AdminDashboard from "./pages/admin/AdminDashboard.jsx";
 import ManageUsers from "./pages/admin/ManageUsers.jsx";
 import ManageStalls from "./pages/admin/ManageStalls.jsx";
+import AdminEvents from "./pages/admin/AdminEvents.jsx";
 
 function LoadingScreen() {
   return (
@@ -277,6 +278,8 @@ export default function App() {
       />
 
       {/* Admin pages */}
+      <Route path="/admin/events" element={<ProtectedRoute role="admin"><AdminEvents /></ProtectedRoute>} />
+      <Route path="/admin/events/:eventId/map" element={<ProtectedRoute role="admin"><AdminEvents /></ProtectedRoute>} />
       <Route
         path="/admin"
         element={

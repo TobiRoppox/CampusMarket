@@ -1,3 +1,4 @@
+import "./AdminWorkspace.css";
 import { useState, useEffect, useCallback } from "react";
 import Sidebar from "../../components/common/Sidebar.jsx";
 import { EmptyState } from "../../components/common/Ui.jsx";
@@ -76,7 +77,7 @@ export default function ManageUsers() {
   const roleColor = { buyer: "gold", seller: "green", admin: "danger" };
 
   return (
-    <div className="dashboard-layout">
+    <div className="dashboard-layout admin-shell">
       <Sidebar />
       <main className="dashboard-main">
         <div className="topbar">

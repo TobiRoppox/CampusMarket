@@ -51,6 +51,7 @@ export const SELLER_NAV = [
 ];
 
 export const ADMIN_NAV = [
+  { to: "/admin/events", label: "Events", icon: CalendarDays },
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { to: "/admin/users", label: "Registration & Users", icon: Users },
   { to: "/admin/stalls", label: "Stores & Plans", icon: Store },

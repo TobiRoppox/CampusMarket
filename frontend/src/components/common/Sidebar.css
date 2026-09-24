@@ -206,3 +206,21 @@
   .cm-sidebar-chevron { transition: none; }
 }
     
+.cm-sidebar.cm-sidebar--admin { background: #123e2c; box-shadow: none; border-right: 1px solid #234b38; }
+.cm-sidebar--admin .cm-sidebar-brand { min-height: 88px; padding: 20px; border-bottom: 1px solid #ffffff0d; }
+.cm-sidebar--admin .cm-sidebar-logo-mark { background: #f6f6e9; width: 39px; height: 39px; border-radius: 11px; box-shadow: none; }
+.cm-sidebar--admin .cm-sidebar-brand-copy strong { font-size: 11px; letter-spacing: .8px; }
+.cm-sidebar--admin .cm-sidebar-brand-copy small { font-size: 10px; color: #a2bbaa; font-weight: 400; margin-top: 6px; }
+.cm-sidebar--admin .cm-sidebar-user { margin: 24px 16px 18px; width: calc(100% - 32px); padding: 13px; background: #ffffff05; border: 1px solid #ffffff18; border-radius: 10px; box-shadow: none; }
+.cm-sidebar--admin .cm-sidebar-avatar { background: #e5c76f; color: #23482f; width: 36px; height: 36px; font-size: 12px; box-shadow: none; }
+.cm-sidebar--admin .cm-sidebar-user-name { font-size: 12px; }
+.cm-sidebar--admin .cm-sidebar-user-role { font-size: 10px; color: #9bb6a5; margin-top: 5px; opacity: 1; }
+.cm-sidebar--admin .cm-sidebar-group { margin-bottom: 24px; }
+.cm-sidebar--admin .cm-sidebar-group-label { color: #8bac99; font-size: 9px; letter-spacing: 1.3px; font-weight: 500; padding-left: 15px; margin-bottom: 9px; }
+.cm-sidebar--admin .cm-sidebar-link { padding: 12px 14px; color: #c1d2c7; font-size: 12px; font-weight: 500; border-radius: 8px; }
+.cm-sidebar--admin .cm-sidebar-link-icon { background: transparent; width: 24px; height: 24px; }
+.cm-sidebar--admin .cm-sidebar-link.active { color: #f4e6b6; background: #ffffff12; border: 1px solid #ffffff13; box-shadow: none; }
+.cm-sidebar--admin .cm-sidebar-link.active .cm-sidebar-link-icon { color: #e2c674; background: transparent; }
+.cm-sidebar--admin .cm-sidebar-active-dot { width: 5px; height: 5px; box-shadow: none; }
+.cm-sidebar--admin .cm-sidebar-footer { border-top: 1px solid #ffffff0e; padding: 20px 16px; }
+.cm-sidebar--admin .cm-sidebar-secure-note { opacity: .8; }
