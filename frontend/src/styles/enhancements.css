@@ -1,0 +1,334 @@
+/* ─────────────────────────────────────────────────────────────
+   enhancements.css
+   Motion, feedback, and mobile navigation layered on top of
+   global.css. Loaded after it so these rules win on ties.
+   Everything here respects prefers-reduced-motion (see bottom).
+───────────────────────────────────────────────────────────── */
+
+:root {
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --cm-gradient-brand: linear-gradient(135deg, #0F7B3E 0%, #2BA84A 55%, #F4C430 100%);
+  --focus-ring: 0 0 0 3px rgba(15, 123, 62, 0.28);
+  --mobile-tabbar-height: 64px;
+}
+
+::selection { background: rgba(43, 168, 74, 0.22); color: var(--cm-text); }
+
+/* Visible, consistent keyboard focus everywhere */
+:where(a, button, [role="button"], summary):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* ── Keyframes ───────────────────────────────────────────── */
+@keyframes cm-rise {
+  from { opacity: 0; translate: 0 14px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+@keyframes cm-pop {
+  0%   { scale: 0.4; }
+  60%  { scale: 1.25; }
+  100% { scale: 1; }
+}
+@keyframes cm-route-progress {
+  0%   { transform: scaleX(0); opacity: 1; }
+  70%  { transform: scaleX(0.85); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+@keyframes cm-shine {
+  from { transform: translateX(-120%) skewX(-20deg); }
+  to   { transform: translateX(220%) skewX(-20deg); }
+}
+@keyframes cm-float {
+  0%, 100% { translate: 0 0; }
+  50%      { translate: 0 -4px; }
+}
+
+/* ── Page & card entrances ───────────────────────────────── */
+.buyer-home-content > section {
+  animation: cm-rise 0.5s var(--ease-out-soft) backwards;
+}
+.buyer-home-content > section:nth-child(2) { animation-delay: 60ms; }
+.buyer-home-content > section:nth-child(3) { animation-delay: 120ms; }
+.buyer-home-content > section:nth-child(n + 4) { animation-delay: 180ms; }
+
+/* Staggered cards: "backwards" fill so hover transforms still work afterwards */
+.product-card,
+.market-stall-card,
+.buyer-stall-card,
+.buyer-event-card,
+.event-stall-card,
+.stat-card-v2 {
+  animation: cm-rise 0.45s var(--ease-out-soft) backwards;
+}
+:is(.product-card, .market-stall-card, .buyer-stall-card, .buyer-event-card, .event-stall-card, .stat-card-v2):nth-child(2) { animation-delay: 50ms; }
+:is(.product-card, .market-stall-card, .buyer-stall-card, .buyer-event-card, .event-stall-card, .stat-card-v2):nth-child(3) { animation-delay: 100ms; }
+:is(.product-card, .market-stall-card, .buyer-stall-card, .buyer-event-card, .event-stall-card, .stat-card-v2):nth-child(4) { animation-delay: 150ms; }
+:is(.product-card, .market-stall-card, .buyer-stall-card, .buyer-event-card, .event-stall-card, .stat-card-v2):nth-child(5) { animation-delay: 200ms; }
+:is(.product-card, .market-stall-card, .buyer-stall-card, .buyer-event-card, .event-stall-card, .stat-card-v2):nth-child(6) { animation-delay: 250ms; }
+:is(.product-card, .market-stall-card, .buyer-stall-card, .buyer-event-card, .event-stall-card, .stat-card-v2):nth-child(n + 7) { animation-delay: 300ms; }
+
+/* ── Card hover: lift + glow ─────────────────────────────── */
+.product-card,
+.market-stall-card,
+.buyer-stall-card,
+.buyer-event-card,
+.event-stall-card {
+  transition:
+    transform 0.3s var(--ease-out-soft),
+    box-shadow 0.3s var(--ease-out-soft),
+    border-color 0.3s ease;
+}
+.product-card:hover,
+.market-stall-card:hover,
+.buyer-stall-card:hover,
+.buyer-event-card:hover,
+.event-stall-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(15, 123, 62, 0.28);
+  box-shadow:
+    0 18px 36px -18px rgba(15, 123, 62, 0.35),
+    0 6px 14px -8px rgba(15, 23, 42, 0.12);
+}
+.buyer-event-card img,
+.market-stall-card img,
+.event-stall-card img {
+  transition: transform 0.5s var(--ease-out-soft);
+}
+.buyer-event-card:hover img,
+.market-stall-card:hover img,
+.event-stall-card:hover img { transform: scale(1.05); }
+
+/* ── Buttons: shine sweep + tactile press ────────────────── */
+.btn-primary { position: relative; overflow: hidden; isolation: isolate; }
+.btn-primary::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+  transform: translateX(-120%) skewX(-20deg);
+  pointer-events: none;
+  z-index: -1;
+}
+.btn-primary:hover:not(:disabled)::after { animation: cm-shine 0.7s ease; }
+.btn:active:not(:disabled) { transform: scale(0.96); transition-duration: 0.08s; }
+
+/* Add-to-cart: springy press and confirmation pop */
+.add-to-cart-btn { transition: transform 0.2s var(--ease-out-back), background 0.2s ease, box-shadow 0.2s ease; }
+.add-to-cart-btn:hover:not(:disabled) { transform: translateY(-2px) scale(1.06); }
+.add-to-cart-btn:active:not(:disabled) { transform: scale(0.9); }
+.add-to-cart-btn.added { animation: cm-pop 0.4s var(--ease-out-back); }
+.product-favorite-btn.is-favorite svg { animation: cm-pop 0.4s var(--ease-out-back); }
+
+/* Cart counters bump whenever the count changes (keyed in JSX) */
+.cart-badge,
+.mobile-tab-badge { animation: cm-pop 0.4s var(--ease-out-back); }
+
+/* ── Route progress bar ──────────────────────────────────── */
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  height: 3px;
+  background: var(--cm-gradient-brand);
+  transform-origin: left center;
+  pointer-events: none;
+  animation: cm-route-progress 0.6s var(--ease-out-soft) forwards;
+}
+
+/* ── Back to top ─────────────────────────────────────────── */
+.back-to-top {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 400;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--cm-primary);
+  border-radius: var(--radius-full);
+  box-shadow: 0 10px 24px -8px rgba(15, 123, 62, 0.6);
+  opacity: 0;
+  translate: 0 16px;
+  pointer-events: none;
+  transition: opacity 0.25s ease, translate 0.3s var(--ease-out-back), background 0.2s ease;
+}
+.back-to-top.visible { opacity: 1; translate: 0 0; pointer-events: auto; }
+.back-to-top:hover { background: var(--cm-primary-hover); }
+.back-to-top svg { width: 20px; height: 20px; }
+
+/* ── Navbar search shortcut hint ─────────────────────────── */
+.navbar-search-kbd {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--cm-text-muted);
+  background: #fff;
+  border: 1px solid var(--cm-border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+}
+.navbar-search:focus-within .navbar-search-kbd { display: none; }
+@media (hover: none) { .navbar-search-kbd { display: none; } }
+
+/* ── Home hero quick categories ──────────────────────────── */
+.buyer-hero-quick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+  font-size: 0.8rem;
+  color: var(--cm-text-secondary);
+}
+.buyer-hero-quick > span { font-weight: 600; margin-right: 0.15rem; }
+.buyer-hero-quick a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  font-weight: 600;
+  color: var(--cm-primary);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(15, 123, 62, 0.18);
+  border-radius: var(--radius-full);
+  backdrop-filter: blur(6px);
+  transition: transform 0.2s var(--ease-out-back), background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+.buyer-hero-quick a:hover {
+  color: #fff;
+  background: var(--cm-primary);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 18px -10px rgba(15, 123, 62, 0.7);
+}
+.buyer-hero-quick svg { width: 14px; height: 14px; }
+
+/* Inline empty states get a gentle, friendly bob */
+.buyer-inline-empty > svg { animation: cm-float 3s ease-in-out infinite; }
+
+/* ── Dashboard polish ────────────────────────────────────── */
+.cm-sidebar-link { transition: background 0.2s ease, color 0.2s ease, padding-left 0.2s var(--ease-out-soft); }
+.cm-sidebar-link:hover:not(.active) { padding-left: 1.1rem; }
+.stat-card-v2-icon { transition: transform 0.3s var(--ease-out-back); }
+.stat-card-v2:hover .stat-card-v2-icon { transform: rotate(-8deg) scale(1.1); }
+.data-table tbody tr { transition: background 0.15s ease; }
+
+/* ── Mobile tab bar ──────────────────────────────────────── */
+.mobile-tabbar { display: none; }
+
+@media (max-width: 680px) {
+  body.has-mobile-tabbar {
+    padding-bottom: calc(var(--mobile-tabbar-height) + env(safe-area-inset-bottom));
+  }
+
+  .mobile-tabbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 450;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    height: calc(var(--mobile-tabbar-height) + env(safe-area-inset-bottom));
+    padding: 0.35rem 0.4rem env(safe-area-inset-bottom);
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    border-top: 1px solid var(--cm-border);
+    box-shadow: 0 -8px 24px -16px rgba(15, 23, 42, 0.3);
+  }
+
+  .mobile-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    min-width: 0;
+    color: var(--cm-text-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    border-radius: 14px;
+    -webkit-tap-highlight-color: transparent;
+    transition: color 0.2s ease;
+  }
+  .mobile-tab:active .mobile-tab-icon { transform: scale(0.88); }
+
+  .mobile-tab-icon {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 28px;
+    border-radius: var(--radius-full);
+    transition: background 0.25s ease, transform 0.25s var(--ease-out-back);
+  }
+  .mobile-tab-icon svg { width: 20px; height: 20px; }
+
+  .mobile-tab.active { color: var(--cm-primary); }
+  .mobile-tab.active .mobile-tab-icon {
+    background: var(--cm-primary-light);
+    transform: translateY(-1px);
+  }
+  .mobile-tab.active .mobile-tab-label { font-weight: 800; }
+
+  .mobile-tab-label {
+    max-width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .mobile-tab-badge {
+    position: absolute;
+    top: -3px;
+    right: 4px;
+    min-width: 17px;
+    height: 17px;
+    display: grid;
+    place-items: center;
+    padding: 0 0.25rem;
+    color: #fff;
+    background: var(--cm-danger);
+    border: 2px solid #fff;
+    border-radius: var(--radius-full);
+    font-size: 0.58rem;
+    font-weight: 800;
+  }
+
+  /* Centered above the tab bar so it never covers card corner buttons */
+  body.has-mobile-tabbar .back-to-top {
+    bottom: calc(var(--mobile-tabbar-height) + env(safe-area-inset-bottom) + 0.75rem);
+    right: auto;
+    left: 50%;
+    width: 38px;
+    height: 38px;
+    margin-left: -19px;
+    background: rgba(15, 123, 62, 0.92);
+    backdrop-filter: blur(6px);
+  }
+}
+
+/* ── Reduced motion ──────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

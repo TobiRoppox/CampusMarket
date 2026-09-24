@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import {
   FiArrowRight,
   FiArrowUpRight,
+  FiCalendar,
   FiCheckCircle,
   FiCoffee,
   FiGrid,
@@ -182,6 +183,22 @@ export default function BuyerHome() {
               </button>
             </form>
 
+            <div className="buyer-hero-quick" aria-label="Popular categories">
+              <span>Popular:</span>
+              <Link to="/browse?category=food">
+                <FiCoffee aria-hidden="true" /> Food
+              </Link>
+              <Link to="/browse?category=clothing">
+                <FiShoppingBag aria-hidden="true" /> Clothing
+              </Link>
+              <Link to="/browse?category=electronics">
+                <FiMonitor aria-hidden="true" /> Electronics
+              </Link>
+              <Link to="/browse?category=student-made">
+                <FiPackage aria-hidden="true" /> Student made
+              </Link>
+            </div>
+
             <div className="buyer-hero-trust">
               <span>
                 <FiCheckCircle aria-hidden="true" /> Verified campus sellers
@@ -255,7 +272,21 @@ export default function BuyerHome() {
             </Link>
           </div>
 
-          {!marketLoading && !marketError && !campusEvents.length && <p>No upcoming campus events.</p>}
+          {!marketLoading && !marketError && !campusEvents.length && (
+            <div className="buyer-inline-empty">
+              <FiCalendar aria-hidden="true" />
+              <div>
+                <strong>No upcoming events yet.</strong>
+                <span>
+                  Campus fairs and pop-ups will show up here. Check past
+                  events to meet the sellers who joined.
+                </span>
+              </div>
+              <Link to="/events" className="btn btn-outline btn-sm">
+                View events
+              </Link>
+            </div>
+          )}
           <div className="buyer-event-grid">
             {campusEvents.map((event) => (
               <Link

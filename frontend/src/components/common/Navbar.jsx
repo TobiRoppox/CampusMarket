@@ -19,6 +19,7 @@ import {
   FiShoppingCart,
   FiX,
 } from "react-icons/fi";
+import MobileTabBar from "./MobileTabBar.jsx";
 import "./Navbar.css";
 
 const NAV_LINKS = [
@@ -41,6 +42,7 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const userMenuRef = useRef(null);
+  const searchInputRef = useRef(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -63,6 +65,31 @@ export default function Navbar() {
     setMobileOpen(false);
     setDropdownOpen(false);
   }, [location.pathname, location.search]);
+
+  // "/" jumps to search from anywhere, like most modern marketplaces.
+  useEffect(() => {
+    const handleShortcut = (event) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      const input = searchInputRef.current;
+      if (input && input.offsetParent !== null) {
+        input.focus();
+        input.select();
+      } else {
+        setMobileOpen(true);
+      }
+    };
+
+    document.addEventListener("keydown", handleShortcut);
+    return () => document.removeEventListener("keydown", handleShortcut);
+  }, []);
 
   useEffect(() => {
     if (!dropdownOpen) return undefined;
@@ -131,12 +158,18 @@ export default function Navbar() {
               Search products, stalls, or events
             </label>
             <input
+              ref={searchInputRef}
               id="navbar-search-input"
               type="search"
               placeholder="Search campus marketplace"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
             />
+            {!searchTerm && (
+              <kbd className="navbar-search-kbd" aria-hidden="true" title="Press / to search">
+                /
+              </kbd>
+            )}
             <button type="submit" aria-label="Submit search">
               <FiSearch aria-hidden="true" />
             </button>
@@ -153,7 +186,7 @@ export default function Navbar() {
                 >
                   <FiShoppingCart />
                   {numericCartCount > 0 && (
-                    <span className="cart-badge">{cartCount}</span>
+                    <span key={cartCount} className="cart-badge">{cartCount}</span>
                   )}
                 </Link>
                 <Link
@@ -431,6 +464,8 @@ export default function Navbar() {
           </div>
         </>
       )}
+
+      <MobileTabBar user={user} cartCount={numericCartCount} />
     </header>
   );
 }
