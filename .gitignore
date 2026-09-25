@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Build output
+frontend/dist/
+
+# Python
+__pycache__/
+*.pyc
+
+# Environment / secrets (commit the .env.example files instead)
+.env
+.env.*
+!.env.example
+
+# Local runtime data (contains user accounts and password hashes)
+backend/.data/
+backend/src/data/market-data.json
+backend/src/data/market-data.json.tmp
+
+# Editor / tool folders
+.sixth/
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
