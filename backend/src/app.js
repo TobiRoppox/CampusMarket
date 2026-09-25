@@ -18,6 +18,7 @@ import posRoutes from "./routes/pos.routes.js";
 import { productPhotoDirectory } from "./middleware/productPhoto.js";
 import { ready } from "./data/marketStore.js";
 import { databaseLabel } from "./db/index.js";
+import { usingSupabaseStorage } from "./services/photoStorage.js";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -93,7 +94,10 @@ app.use((err, _req, res, _next) => {
 ready()
   .then(() => {
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT} (database: ${databaseLabel()})`);
+      console.log(`Server running on port ${PORT} (database: ${databaseLabel()}, photos: ${usingSupabaseStorage() ? "Supabase Storage" : "local disk"})`);
+      if (process.env.NODE_ENV === "production" && !usingSupabaseStorage()) {
+        console.warn("[photos] Product photos are stored on local disk and will be lost if this host's disk is reset. Set PHOTO_STORAGE=supabase.");
+      }
     });
   })
   .catch((error) => {

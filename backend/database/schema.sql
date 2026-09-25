@@ -207,6 +207,19 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Supabase only: public bucket for product photos (PHOTO_STORAGE=supabase).
+-- Skipped on plain PostgreSQL/PGlite, where the storage schema doesn't exist.
+DO $$
+BEGIN
+  IF to_regclass('storage.buckets') IS NOT NULL THEN
+    INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    VALUES ('product-images', 'product-images', TRUE, 5242880, ARRAY['image/png', 'image/jpeg', 'image/webp'])
+    ON CONFLICT (id) DO NOTHING;
+  END IF;
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'Create the public "product-images" bucket in the Supabase dashboard (Storage).';
+END $$;
+
 -- Supabase exposes the public schema through its REST API using the public anon key.
 -- Row level security with no policies blocks that path entirely; the backend connects
 -- as the database owner and is not affected.

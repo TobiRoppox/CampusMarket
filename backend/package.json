@@ -7,7 +7,8 @@
     "start": "node src/app.js",
     "seed:events": "node scripts/seed-demo-events.js",
     "test": "node --test tests/*.test.js",
-    "db:import": "node scripts/import-json.js"
+    "db:import": "node scripts/import-json.js",
+    "photos:migrate": "node scripts/migrate-photos.js"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
