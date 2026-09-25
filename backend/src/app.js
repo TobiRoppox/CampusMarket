@@ -28,8 +28,8 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
 // ── Rate limiting ────────────────────────────────────────────────────────────
 const limiter = rateLimit({
@@ -40,6 +40,17 @@ const limiter = rateLimit({
   message: { error: "Too many requests, please try again later." },
 });
 app.use(limiter);
+
+// Stricter limit for password-guessing targets
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { error: "Too many attempts. Please wait 15 minutes and try again." },
+});
+app.use(["/api/auth/login", "/api/auth/register", "/api/auth/password"], authLimiter);
 app.use("/api/product-images", express.static(productPhotoDirectory, { dotfiles: "deny", index: false, maxAge: "1d" }));
 
 // ── Health check ─────────────────────────────────────────────────────────────
@@ -67,9 +78,12 @@ app.use((_req, res) => {
 
 // ── Global error handler ─────────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
-  console.error("[ERROR]", err);
-  const status = err.status || err.statusCode || 500;
-  const message = err.message || "Internal server error";
+  let status = err.status || err.statusCode || 500;
+  // Stores throw plain "X not found" errors without a status
+  if (status === 500 && /not found/i.test(err.message || "")) status = 404;
+  if (status >= 500) console.error("[ERROR]", err);
+  // Never expose internal error details to clients
+  const message = status >= 500 ? "Internal server error" : err.message || "Request failed";
   res.status(status).json({ error: message });
 });
 

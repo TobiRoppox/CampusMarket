@@ -33,6 +33,16 @@ export const registerSchema = z.object({
   message: "Sellers must provide a store name and CSUCC campus location.", path: ["store_name"],
 });
 
+export const changePasswordSchema = z.object({
+  current_password: z.string().min(1).max(100),
+  new_password: z.string().min(8).max(100),
+});
+
+export const profileSchema = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  avatar_url: z.string().trim().max(2000).refine((value) => !value || /^https?:\/\//i.test(value), "Avatar must be an http(s) image URL.").optional(),
+});
+
 export const credentialsSchema = z.object({
   campus_id: z.string().trim().min(3).max(50),
   affiliation: z.enum(["student", "faculty", "employee"]),

@@ -14,6 +14,40 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Access tokens expire after 15 minutes. On a 401, trade the refresh token for a new pair
+// once and retry; concurrent 401s share the same refresh request.
+let refreshing = null;
+
+const refreshTokens = async () => {
+  const refreshToken = localStorage.getItem("refreshToken");
+  if (!refreshToken) throw new Error("No refresh token");
+  const { data } = await axios.post(`${api.defaults.baseURL}/auth/refresh`, { refreshToken });
+  localStorage.setItem("accessToken", data.accessToken);
+  localStorage.setItem("refreshToken", data.refreshToken);
+  return data.accessToken;
+};
+
+api.interceptors.response.use(undefined, async (error) => {
+  const original = error.config;
+  const isAuthCall = /\/auth\/(login|register|refresh)$/.test(original?.url || "");
+  if (error.response?.status !== 401 || !original || original._retried || isAuthCall) {
+    throw error;
+  }
+
+  original._retried = true;
+  try {
+    refreshing ??= refreshTokens().finally(() => { refreshing = null; });
+    const token = await refreshing;
+    original.headers.Authorization = `Bearer ${token}`;
+    return api(original);
+  } catch {
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    if (window.location.pathname !== "/login") window.location.assign("/login");
+    throw error;
+  }
+});
+
 export const productService = {
   uploadPhoto: (file) => {
     const data = new FormData();
@@ -24,7 +58,7 @@ export const productService = {
   getOne: (id) => api.get(`/products/${id}`),
   getRecommendations: (userId) =>
     api.get(`/products/recommendations/${userId}`),
-  getSimilar: (id) => api.get(`/products/${id}/similar`),
+  getSimilar: (id) => api.get(`/products/similar/${id}`),
   create: (data) => api.post("/products", data),
   update: (id, data) => api.put(`/products/${id}`, data),
   remove: (id) => api.delete(`/products/${id}`),
@@ -65,6 +99,7 @@ export const authService = {
 
   logout: () => {
     localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
 
     return Promise.resolve({
       data: {

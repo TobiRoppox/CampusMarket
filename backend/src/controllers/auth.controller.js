@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { authStore } from "../data/marketStore.js";
+import { issuedBeforePasswordChange } from "../middleware/auth.js";
 
 // ── TOKEN HELPERS ─────────────────────────────────────────────
 const signAccessToken = (user) =>
@@ -67,6 +68,7 @@ export const refresh = async (req, res, next) => {
 
     const user = await authStore.getUserById(payload.id);
     if (user.is_banned) return res.status(403).json({ error: "Account suspended." });
+    if (issuedBeforePasswordChange(payload, user)) return res.status(401).json({ error: "Session expired. Please log in again." });
     const newAccessToken = signAccessToken(user);
     const newRefreshToken = signRefreshToken(user.id);
 
@@ -96,6 +98,18 @@ export const updateProfile = async (req, res, next) => {
 
     const data = await authStore.updateUserProfile(req.user.id, updates);
     res.json(data);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ── CHANGE PASSWORD ──────────────────────────────────────────
+// Tokens issued before the change stop working; this session gets fresh ones.
+export const changePassword = async (req, res, next) => {
+  try {
+    const { current_password, new_password } = req.body;
+    const user = await authStore.changePassword(req.user.id, current_password, new_password);
+    res.json({ user, accessToken: signAccessToken(user), refreshToken: signRefreshToken(user.id) });
   } catch (err) {
     next(err);
   }

@@ -1,6 +1,10 @@
 import jwt from "jsonwebtoken";
 import { authStore } from "../data/marketStore.js";
 
+/** True when a token predates the user's last password change (JWT iat is in seconds). */
+export const issuedBeforePasswordChange = (payload, user) =>
+  Boolean(user.password_changed_at) && payload.iat < Math.floor(Date.parse(user.password_changed_at) / 1000);
+
 /**
  * Verify JWT access token and attach user payload to req.user
  */
@@ -16,6 +20,7 @@ export const verifySession = async (req, res, next) => {
     if (decoded.type === "refresh") return res.status(401).json({ error: "An access token is required." });
     const user = await authStore.getUserById(decoded.id);
     if (user.is_banned) return res.status(403).json({ error: "Account suspended." });
+    if (issuedBeforePasswordChange(decoded, user)) return res.status(401).json({ error: "Token expired" });
     req.user = user;
     next();
   } catch (err) {

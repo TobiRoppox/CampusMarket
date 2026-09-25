@@ -39,7 +39,9 @@ export const updateOrderStatus = async (req, res, next) => {
     const validStatuses = [
       "pending",
       "confirmed",
+      "preparing",
       "ready",
+      "completed",
       "delivered",
       "cancelled",
     ];
