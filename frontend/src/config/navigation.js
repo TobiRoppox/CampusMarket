@@ -25,6 +25,7 @@ import {
   AlertTriangle,
   LogOut,
   Search,
+  KeyRound,
 } from "lucide-react";
 
 export const BUYER_NAV = [
@@ -48,6 +49,7 @@ export const SELLER_NAV = [
   { to: "/seller/messages", label: "Messages", icon: MessageSquare },
   { to: "/seller/reviews", label: "Reviews", icon: Star },
   { to: "/seller/settings", label: "Settings", icon: Settings },
+  { to: "/account/password", label: "Password", icon: KeyRound },
 ];
 
 export const ADMIN_NAV = [
@@ -55,6 +57,8 @@ export const ADMIN_NAV = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { to: "/admin/users", label: "Registration & Users", icon: Users },
   { to: "/admin/stalls", label: "Stores & Plans", icon: Store },
+  { to: "/admin/applications", label: "Event Applications", icon: FileText },
+  { to: "/account/password", label: "Password", icon: KeyRound },
 ];
 
 export const BUYER_TOP_LINKS = [

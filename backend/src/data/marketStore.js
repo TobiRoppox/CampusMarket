@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 import { getPlan } from "../config/plans.js";
 import { cancellationDeadline, canBuyerCancel } from "../config/orderCancellation.js";
 import { getDb, query, transaction } from "../db/index.js";
+import { getRecommendedProductIds, getSimilarProductIds } from "../services/aiService.js";
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
@@ -339,6 +340,13 @@ export const stallStore = {
 };
 
 // ── Products ──────────────────────────────────────────────────────────────────
+/** Load the given product IDs that are publicly visible, keeping the given order. */
+const visibleProductsInOrder = async (ids, limit) => {
+  if (!ids.length) return [];
+  const rows = await q(`${PRODUCT_SELECT} WHERE p.id = ANY($1) AND p.is_active AND ${PUBLIC_STALL}`, [ids]);
+  return ids.map((id) => rows.find((row) => row.id === id)).filter(Boolean).slice(0, limit);
+};
+
 export const productStore = {
   async listProducts({
     q: search = "", category, page = 1, limit = 20, stallId,
@@ -417,18 +425,31 @@ export const productStore = {
     return true;
   },
 
-  async getRecommendations(_userId) {
-    return q(`${PRODUCT_SELECT} WHERE p.is_active AND ${PUBLIC_STALL} ORDER BY p.created_at, p.id LIMIT 8`);
+  // AI suggestions first (visible products only, in AI order), topped up by simple rules.
+  async getRecommendations(userId) {
+    const limit = 8;
+    const picked = await visibleProductsInOrder(await getRecommendedProductIds(userId, limit), limit);
+    if (picked.length >= limit) return picked;
+    const fallback = await q(
+      `${PRODUCT_SELECT} WHERE p.is_active AND ${PUBLIC_STALL} AND NOT (p.id = ANY($1))
+       ORDER BY p.view_count DESC, p.created_at, p.id LIMIT $2`,
+      [picked.map((product) => product.id), limit - picked.length],
+    );
+    return [...picked, ...fallback];
   },
 
   async getSimilar(productId) {
-    return q(
+    const limit = 4;
+    const picked = await visibleProductsInOrder((await getSimilarProductIds(productId, limit)).filter((id) => id !== productId), limit);
+    if (picked.length >= limit) return picked;
+    const fallback = await q(
       `${PRODUCT_SELECT}
-       WHERE p.is_active AND ${PUBLIC_STALL} AND p.id <> $1
+       WHERE p.is_active AND ${PUBLIC_STALL} AND p.id <> $1 AND NOT (p.id = ANY($2))
          AND p.category = (SELECT category FROM products WHERE id = $1)
-       ORDER BY p.created_at, p.id LIMIT 4`,
-      [productId],
+       ORDER BY p.created_at, p.id LIMIT $3`,
+      [productId, picked.map((product) => product.id), limit - picked.length],
     );
+    return [...picked, ...fallback];
   },
 };
 
@@ -792,12 +813,27 @@ export const eventStore = {
     );
   },
 
+  async reviewApplication(applicationId, actorId, { status, note }) {
+    return tx(async (run) => {
+      const [application] = await run("SELECT status FROM seller_applications WHERE id = $1 FOR UPDATE", [applicationId]);
+      if (!application) fail("Application not found", 404);
+      if (String(application.status).toLowerCase() !== "pending") fail("This application has already been reviewed.", 409);
+      const [updated] = await run(
+        `UPDATE seller_applications SET status = $2, review_note = $3, reviewed_by = $4, reviewed_at = now()
+         WHERE id = $1 RETURNING *`,
+        [applicationId, status, note, actorId],
+      );
+      await audit(run, actorId, `application.${status}`, applicationId, note);
+      return updated;
+    });
+  },
+
   async listApplications({ eventId, status, sellerId } = {}) {
     return q(
-      `SELECT a.*, CASE WHEN e.id IS NULL THEN NULL ELSE json_build_object(
+      `SELECT a.*, u.name AS seller_name, CASE WHEN e.id IS NULL THEN NULL ELSE json_build_object(
                 'id', e.id, 'name', e.name, 'date', e.date, 'end_date', e.end_date,
                 'location', coalesce(e.location, ''), 'description', coalesce(e.description, '')) END AS event
-       FROM seller_applications a LEFT JOIN events e ON e.id = a.event_id
+       FROM seller_applications a LEFT JOIN events e ON e.id = a.event_id LEFT JOIN users u ON u.id = a.seller_id
        WHERE ($1::text IS NULL OR a.event_id = $1) AND ($2::text IS NULL OR lower(a.status) = lower($2))
          AND ($3::text IS NULL OR a.seller_id = $3)
        ORDER BY a.created_at DESC`,

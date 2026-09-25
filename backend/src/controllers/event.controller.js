@@ -67,6 +67,18 @@ export const getMySellerApplications = async (req, res, next) => {
   }
 };
 
+// PUT /api/seller-applications/:id/review
+// Admin approves or rejects a pending application
+export const reviewSellerApplication = async (req, res, next) => {
+  try {
+    const application = await eventStore.reviewApplication(req.params.id, req.user.id, req.body);
+
+    res.json(application);
+  } catch (error) {
+    next(error);
+  }
+};
+
 // GET /api/seller-applications
 // Admin-only application review
 export const getSellerApplications = async (req, res, next) => {

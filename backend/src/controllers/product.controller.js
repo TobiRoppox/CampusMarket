@@ -66,6 +66,10 @@ export const deleteProduct = async (req, res, next) => {
 
 export const getRecommendations = async (req, res, next) => {
   try {
+    // Recommendations reveal browsing history, so only your own (or any, for admins).
+    if (req.params.userId !== req.user.id && req.user.role !== "admin") {
+      return res.status(403).json({ error: "You can only view your own recommendations." });
+    }
     const products = await productStore.getRecommendations(req.params.userId);
     res.json(products);
   } catch (err) {

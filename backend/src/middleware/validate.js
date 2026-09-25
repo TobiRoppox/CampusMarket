@@ -94,6 +94,11 @@ export const reviewRegistrationSchema = z.object({
   credentials_checked: z.boolean().optional(),
 }).refine((value) => value.status !== "approved" || value.credentials_checked === true, { message: "Confirm that credentials were checked against CSUCC records." });
 
+export const reviewApplicationSchema = z.object({
+  status: z.enum(["approved", "rejected"]),
+  note: z.string().trim().min(5).max(500),
+});
+
 export const posSchema = z.object({
   request_id: z.string().uuid(),
   buyer_id: z.string().uuid(),

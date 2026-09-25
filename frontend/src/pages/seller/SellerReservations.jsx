@@ -56,6 +56,7 @@ const normalizeApplication = (application) => {
     contact: application.contact_info || application.contactInfo || "",
     status: String(application.status || "pending").toLowerCase(),
     createdAt: application.created_at || application.createdAt || null,
+    reviewNote: application.review_note || "",
   };
 };
 
@@ -404,6 +405,11 @@ export default function SellerReservations() {
                               {application.duration === 1 ? "" : "s"}
                             </span>
                           </div>
+                          {application.reviewNote && (
+                            <p className="seller-reservation-business">
+                              <strong>Administrator note:</strong> {application.reviewNote}
+                            </p>
+                          )}
                           <footer>
                             <span>
                               Submitted {formatDate(application.createdAt)}

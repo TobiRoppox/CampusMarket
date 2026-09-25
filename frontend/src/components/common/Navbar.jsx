@@ -9,6 +9,7 @@ import {
   FiGrid,
   FiHeart,
   FiHome,
+  FiLock,
   FiLogOut,
   FiMapPin,
   FiMenu,
@@ -263,6 +264,10 @@ export default function Navbar() {
                         <FiGrid /> Admin panel
                       </Link>
                     )}
+
+                    <Link to="/account/password" className="dropdown-item" role="menuitem">
+                      <FiLock /> Change password
+                    </Link>
 
                     <div className="dropdown-separator" />
                     <button

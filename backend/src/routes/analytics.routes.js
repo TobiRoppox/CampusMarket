@@ -8,6 +8,8 @@ import { verifyToken, requireRole } from "../middleware/auth.js";
 import { stallStore } from "../data/marketStore.js";
 
 const analyticsRouter = AnalyticsRouter();
+
+// Every analytics route: signed-in seller on the Premium plan, or an admin.
 analyticsRouter.use(verifyToken, requireRole("seller", "admin"), async (req, res, next) => {
   try {
     if (req.user.role !== "admin") {
@@ -18,23 +20,8 @@ analyticsRouter.use(verifyToken, requireRole("seller", "admin"), async (req, res
   } catch (error) { next(error); }
 });
 
-analyticsRouter.get(
-  "/sales",
-  verifyToken,
-  requireRole("seller", "admin"),
-  getSalesAnalytics,
-);
-analyticsRouter.get(
-  "/products/top",
-  verifyToken,
-  requireRole("seller", "admin"),
-  getTopProducts,
-);
-analyticsRouter.get(
-  "/categories",
-  verifyToken,
-  requireRole("seller", "admin"),
-  getCategoryBreakdown,
-);
+analyticsRouter.get("/sales", getSalesAnalytics);
+analyticsRouter.get("/products/top", getTopProducts);
+analyticsRouter.get("/categories", getCategoryBreakdown);
 
 export { analyticsRouter as default };

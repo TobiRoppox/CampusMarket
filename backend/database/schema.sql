@@ -189,6 +189,11 @@ CREATE TABLE IF NOT EXISTS seller_applications (
   status               TEXT NOT NULL DEFAULT 'pending',
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Added after the first release; ADD COLUMN IF NOT EXISTS upgrades existing databases.
+ALTER TABLE seller_applications ADD COLUMN IF NOT EXISTS review_note TEXT;
+ALTER TABLE seller_applications ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+ALTER TABLE seller_applications ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+
 -- One active application per seller per event.
 CREATE UNIQUE INDEX IF NOT EXISTS seller_applications_active_key
   ON seller_applications (seller_id, event_id) WHERE status IN ('pending', 'approved', 'reserved');

@@ -3,58 +3,12 @@ Campus Market 2.0 — AI Recommendation Engine
 Hybrid: user-based collaborative filtering + content-based filtering
 """
 
-import os
 import numpy as np
 import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
-from supabase import create_client
-from dotenv import load_dotenv
 
-load_dotenv()
-
-_sb = None
-
-
-def get_supabase():
-    global _sb
-    if _sb is None:
-        _sb = create_client(
-            os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_SERVICE_KEY"],
-        )
-    return _sb
-
-
-# ── Action weights ────────────────────────────────────────────────────────────
-ACTION_WEIGHTS = {
-    "view": 1,
-    "cart_add": 3,
-    "wishlist": 2,
-    "purchase": 5,
-}
-
-
-# ── Data loading ──────────────────────────────────────────────────────────────
-
-def load_behavior_df() -> pd.DataFrame:
-    """Fetch all user-product interactions from Supabase."""
-    sb = get_supabase()
-    rows = sb.table("user_behavior").select("user_id, product_id, action").execute().data
-    if not rows:
-        return pd.DataFrame(columns=["user_id", "product_id", "action", "score"])
-    df = pd.DataFrame(rows)
-    df["score"] = df["action"].map(ACTION_WEIGHTS).fillna(1)
-    # Aggregate multiple interactions per user-product pair
-    df = df.groupby(["user_id", "product_id"], as_index=False)["score"].sum()
-    return df
-
-
-def load_products_df() -> pd.DataFrame:
-    """Fetch all active products with category and price for content-based filtering."""
-    sb = get_supabase()
-    rows = sb.table("products").select("id, name, category, price, stall_id").eq("is_active", True).execute().data
-    return pd.DataFrame(rows) if rows else pd.DataFrame()
+from data_loader import get_popular_product_ids, load_active_products, load_behavior_scores
 
 
 def build_user_item_matrix(df: pd.DataFrame) -> pd.DataFrame:
@@ -164,26 +118,22 @@ def get_popular_products(behavior_df: pd.DataFrame, n: int = 12) -> list:
 def get_recommendations(user_id: str, n: int = 12) -> list:
     """
     Hybrid recommendation:
-    1. Try collaborative filtering (personalised)
+    1. Collaborative filtering (personalised), limited to currently visible products
     2. Fallback to popular products (cold start)
     """
-    behavior_df = load_behavior_df()
-    pivot = build_user_item_matrix(behavior_df)
+    behavior_df = load_behavior_scores()
 
-    # Check if user has any interactions
-    user_interactions = behavior_df[behavior_df["user_id"] == user_id]
-    if user_interactions.empty or len(user_interactions) < 3:
-        # Cold start — return popular
-        return get_popular_products(behavior_df, n)
+    # Needs a few interactions before personalising
+    if (behavior_df["user_id"] == user_id).sum() >= 3:
+        pivot = build_user_item_matrix(behavior_df)
+        visible = set(load_active_products()["id"])
+        cf_ids = [pid for pid in collaborative_filter(user_id, pivot, n=n * 2) if pid in visible][:n]
+        if cf_ids:
+            return cf_ids
 
-    cf_ids = collaborative_filter(user_id, pivot, n=n)
-    if cf_ids:
-        return cf_ids
-
-    return get_popular_products(behavior_df, n)
+    return get_popular_product_ids(n)
 
 
 def get_similar(product_id: str, n: int = 8) -> list:
     """Return content-based similar products for a given product."""
-    products_df = load_products_df()
-    return content_based_filter(product_id, products_df, n)
+    return content_based_filter(product_id, load_active_products(), n)

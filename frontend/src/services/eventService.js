@@ -17,6 +17,8 @@ const eventService = {
 
   // Admin application review
   getApplications: (params = {}) => api.get("/seller-applications", { params }),
+
+  reviewApplication: (id, payload) => api.put(`/seller-applications/${id}/review`, payload),
 };
 
 export default eventService;
