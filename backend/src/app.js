@@ -16,6 +16,8 @@ import orderRoutes from "./routes/order.routes.js";
 import eventRoutes from "./routes/event.routes.js";
 import posRoutes from "./routes/pos.routes.js";
 import { productPhotoDirectory } from "./middleware/productPhoto.js";
+import { ready } from "./data/marketStore.js";
+import { databaseLabel } from "./db/index.js";
 
 const app = express();
 const PORT = process.env.PORT || 5001;
@@ -87,8 +89,16 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: message });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Connect and apply the schema before accepting requests.
+ready()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT} (database: ${databaseLabel()})`);
+    });
+  })
+  .catch((error) => {
+    console.error("[db] Unable to start:", error.message);
+    process.exit(1);
+  });
 
 export default app;

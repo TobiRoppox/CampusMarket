@@ -6,18 +6,14 @@ import path from "node:path";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import bcrypt from "bcryptjs";
 
 test("CSUCC registration, store plans, ownership, public visibility, messaging and POS", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "campus-requirements-"));
-  const file = path.join(directory, "market-data.json");
-  const adminId = randomUUID();
-  fs.writeFileSync(file, JSON.stringify({ users: [{ id: adminId, name: "Test Administrator", email: "admin@test.invalid", password_hash: bcrypt.hashSync("testpassword", 4), role: "admin", status: "approved" }], stalls: [], products: [], orders: [], carts: [], messages: [], behavior: [], events: [], eventStalls: [], applications: [] }));
   const socket = net.createServer();
   await new Promise((resolve) => socket.listen(0, "127.0.0.1", resolve));
   const port = socket.address().port;
   await new Promise((resolve) => socket.close(resolve));
-  const child = spawn(process.execPath, ["src/app.js"], { cwd: process.cwd(), env: { ...process.env, PORT: String(port), MARKET_DATA_FILE: file, PRODUCT_PHOTO_DIR: path.join(directory, "photos"), JWT_SECRET: "requirements-test-only-secret", NODE_ENV: "test" }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, ["src/app.js"], { cwd: process.cwd(), env: { ...process.env, PORT: String(port), DATABASE_URL: "", PGLITE_DIR: path.join(directory, "db"), SEED_DEMO: "false", BOOTSTRAP_ADMIN_EMAIL: "admin@test.invalid", BOOTSTRAP_ADMIN_PASSWORD: "testpassword", PRODUCT_PHOTO_DIR: path.join(directory, "photos"), JWT_SECRET: "requirements-test-only-secret", NODE_ENV: "test" }, stdio: ["ignore", "pipe", "pipe"] });
   let diagnostics = "";
   child.stderr.on("data", (chunk) => { diagnostics += chunk; });
   t.after(async () => {
@@ -28,7 +24,7 @@ test("CSUCC registration, store plans, ownership, public visibility, messaging a
     fs.rmSync(directory, { recursive: true, force: true });
   });
   await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Test server did not start: ${diagnostics}`)), 10000);
+    const timeout = setTimeout(() => reject(new Error(`Test server did not start: ${diagnostics}`)), 30000);
     child.stdout.on("data", (chunk) => { if (String(chunk).includes("Server running")) { clearTimeout(timeout); resolve(); } });
     child.once("exit", () => { clearTimeout(timeout); reject(new Error(diagnostics)); });
   });
